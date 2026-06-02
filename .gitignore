@@ -1,0 +1,22 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editor / agent config (machine-local)
+.claude/
+.vscode/
+.idea/
+.DS_Store
+
+# Credentials — never commit
+*.json
+!**/example*.json
+.env
+.env.*
+service-account*.json
+credentials*.json
+application_default_credentials.json
