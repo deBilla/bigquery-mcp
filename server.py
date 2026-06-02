@@ -31,8 +31,18 @@ if not PROJECT_ID:
     )
 LOCATION = os.environ.get("BQ_LOCATION", "US")
 
-# Cap bytes scanned per query. Default 5 GB (~$0.03 at on-demand pricing).
+# Hard cap on bytes scanned per query. Queries estimated above this NEVER run,
+# even with confirmation. Default 5 GB.
 MAX_BYTES_BILLED = int(os.environ.get("BQ_MAX_BYTES_BILLED", 5 * 1024**3))
+
+# Soft "this is costly" threshold. A query estimated to scan more than this is
+# NOT run immediately — the tool reports the estimated size/cost and asks the
+# caller to confirm (re-call with confirm_expensive=True). Default 1 GB.
+WARN_BYTES = int(os.environ.get("BQ_WARN_BYTES", 1 * 1024**3))
+
+# On-demand price used only to render a friendly cost estimate. BigQuery US
+# on-demand analysis is ~$6.25 per TiB scanned.
+COST_PER_TIB_USD = float(os.environ.get("BQ_COST_PER_TIB_USD", 6.25))
 
 # Default row cap returned to the model so responses stay small.
 DEFAULT_ROW_LIMIT = int(os.environ.get("BQ_ROW_LIMIT", 200))
@@ -59,6 +69,15 @@ def client() -> bigquery.Client:
 
 def _dataset_allowed(dataset_id: str) -> bool:
     return not DATASET_ALLOWLIST or dataset_id in DATASET_ALLOWLIST
+
+
+def _scan_estimate(num_bytes: int) -> dict:
+    """Human-friendly scan size and on-demand cost estimate for `num_bytes`."""
+    return {
+        "estimated_bytes": num_bytes,
+        "estimated_scan": f"{num_bytes / 1024**3:.2f} GiB",
+        "estimated_cost_usd": round(num_bytes / 1024**4 * COST_PER_TIB_USD, 4),
+    }
 
 
 @mcp.tool()
@@ -132,16 +151,25 @@ def get_table_schema(dataset_id: str, table_id: str) -> str:
 
 
 @mcp.tool()
-def run_query(sql: str, max_rows: int = DEFAULT_ROW_LIMIT) -> str:
+def run_query(
+    sql: str, max_rows: int = DEFAULT_ROW_LIMIT, confirm_expensive: bool = False
+) -> str:
     """Run a read-only (SELECT/WITH) SQL query against BigQuery and return rows.
 
-    The query is validated with a dry run first; only SELECT statements are
-    permitted and a byte-scan cap protects against expensive queries. Always
-    fully-qualify tables as `<project>.<dataset>.<table>`.
+    Cost safety: the query is ALWAYS dry-run first to estimate how much data it
+    will scan. If that estimate is above the warning threshold, the query does
+    NOT run — instead this returns `status: "confirmation_required"` with the
+    estimated size and cost. In that case, tell the user how much it will scan
+    and roughly cost, and only re-call with confirm_expensive=true if they agree.
+    Queries above the hard cap never run, even with confirmation.
+
+    Always fully-qualify tables as `<project>.<dataset>.<table>`.
 
     Args:
         sql: A SELECT (or WITH ... SELECT) query.
         max_rows: Max rows to return to keep responses small (default 200).
+        confirm_expensive: Set True only after the user has agreed to a query
+            previously flagged as costly. Leave False for the first attempt.
     """
     # 1) Dry run: validate, estimate cost, and confirm it is read-only.
     dry_cfg = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
@@ -161,17 +189,39 @@ def run_query(sql: str, max_rows: int = DEFAULT_ROW_LIMIT) -> str:
         )
 
     est_bytes = dry.total_bytes_processed or 0
+    scan = _scan_estimate(est_bytes)
+
+    # 2a) Above the hard cap — never run, regardless of confirmation.
     if est_bytes > MAX_BYTES_BILLED:
         return json.dumps(
             {
-                "error": "query would scan too much data",
-                "estimated_bytes": est_bytes,
+                "error": "query exceeds the hard scan limit and will not run",
+                **scan,
                 "limit_bytes": MAX_BYTES_BILLED,
                 "hint": "Add filters (e.g. on a date/partition column) or select fewer columns.",
-            }
+            },
+            indent=2,
         )
 
-    # 2) Real run with a hard byte cap as a second line of defense.
+    # 2b) Costly but allowed — bounce back to the user for confirmation.
+    if est_bytes > WARN_BYTES and not confirm_expensive:
+        return json.dumps(
+            {
+                "status": "confirmation_required",
+                "message": (
+                    f"This query will scan about {scan['estimated_scan']} "
+                    f"(≈ ${scan['estimated_cost_usd']}), which is above the cost "
+                    f"warning threshold. Let the user know the estimated size and "
+                    f"cost and ask whether to proceed. If they agree, call "
+                    f"run_query again with the same SQL and confirm_expensive=true."
+                ),
+                **scan,
+                "warn_threshold_bytes": WARN_BYTES,
+            },
+            indent=2,
+        )
+
+    # 3) Real run with a hard byte cap as a second line of defense.
     cfg = bigquery.QueryJobConfig(maximum_bytes_billed=MAX_BYTES_BILLED)
     job = client().query(sql, job_config=cfg)
     rows = [dict(r) for r in job.result(max_results=max_rows)]
@@ -182,6 +232,7 @@ def run_query(sql: str, max_rows: int = DEFAULT_ROW_LIMIT) -> str:
             "row_count": len(rows),
             "truncated": len(rows) >= max_rows,
             "bytes_processed": job.total_bytes_processed,
+            **_scan_estimate(job.total_bytes_processed or 0),
         },
         indent=2,
         default=str,
