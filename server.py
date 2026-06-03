@@ -240,4 +240,19 @@ def run_query(
 
 
 if __name__ == "__main__":
-    mcp.run()
+    # Transport selection. Default is "stdio" — the right choice when a client
+    # (Claude Desktop, Claude Code, marsClaw) spawns this as a subprocess.
+    #
+    # Set BQ_MCP_TRANSPORT=http (or sse) to instead serve over the network, so
+    # a remote/containerized client can connect by URL. Used by nanoclaw, whose
+    # agents run in isolated Docker containers and reach this host server via
+    # http://host.docker.internal:<port>/mcp. Auth stays here on the host (ADC),
+    # so no Google credentials ever enter the container.
+    transport = os.environ.get("BQ_MCP_TRANSPORT", "stdio")
+    if transport in ("http", "streamable-http", "sse"):
+        mcp.settings.host = os.environ.get("BQ_MCP_HOST", "0.0.0.0")
+        mcp.settings.port = int(os.environ.get("BQ_MCP_PORT", "8765"))
+        # FastMCP names the streamable-HTTP transport "streamable-http".
+        mcp.run(transport="sse" if transport == "sse" else "streamable-http")
+    else:
+        mcp.run()

@@ -61,6 +61,14 @@ gcloud auth application-default login
 | `BQ_COST_PER_TIB_USD` | `6.25` | On-demand price used to render the cost estimate |
 | `BQ_ROW_LIMIT` | `200` | Default rows returned |
 | `BQ_DATASET_ALLOWLIST` | _(empty = all)_ | Comma-separated dataset IDs |
+| `BQ_MCP_TRANSPORT` | `stdio` | `stdio` (subprocess) or `http`/`sse` (serve over network) |
+| `BQ_MCP_HOST` | `0.0.0.0` | Bind host when transport is `http`/`sse` |
+| `BQ_MCP_PORT` | `8765` | Bind port when transport is `http`/`sse` |
+
+By default the server speaks **stdio** — the right choice when a client spawns
+it (Claude Desktop, Claude Code). To reach it from a remote or containerized
+client, run it over HTTP instead — see
+[Connecting from a containerized client (nanoclaw)](docs/nanoclaw.md).
 
 ## Register with a client
 
