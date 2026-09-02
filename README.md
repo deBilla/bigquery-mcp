@@ -215,19 +215,7 @@ claude mcp add bigquery \
   -- /abs/path/bigquery-mcp/.venv/bin/data-platform-mcp
 ```
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "bigquery": {
-      "command": "/abs/path/bigquery-mcp/.venv/bin/data-platform-mcp",
-      "args": [],
-      "env": { "BQ_PROJECT": "your-gcp-project" }
-    }
-  }
-}
-```
+**Claude Desktop** — see the dedicated section below; it needs absolute paths.
 
 ### 5. Restart the client and ask a question
 
@@ -235,6 +223,111 @@ claude mcp add bigquery \
 > `orders` table have?"
 
 ---
+
+## Claude Desktop
+
+Most of a data team will use Desktop rather than the CLI, and it has one
+failure mode the CLI does not.
+
+**Claude Desktop does not inherit your shell `PATH`.** It launches from the
+Finder, so `uvx`, `python` and anything installed by Homebrew or `uv` are
+invisible to it. A config that says `"command": "uvx"` fails with `ENOENT` —
+the server never starts, and the error names the command rather than the
+reason. **Every path in this file must be absolute.**
+
+What does *not* break: **credentials**. Application Default Credentials are a
+file that the Google libraries read directly, so `gcloud` does not need to be
+on `PATH` for queries to work — it is only needed once, in a terminal, to
+create that file. Verified by running this server with an entirely empty
+environment: the query succeeded.
+
+### 1. Install the server
+
+In a terminal, once:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # provides uvx
+which uvx                                          # note the absolute path
+```
+
+Typically `/Users/<you>/.local/bin/uvx`. Use whatever `which` prints.
+
+### 2. Authenticate
+
+Also in a terminal, once — see [step 2](#2-authenticate-to-google-one-time)
+above. This writes the credentials file Desktop will use.
+
+### 3. Edit the config
+
+| OS | File |
+| --- | --- |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+
+Create it if it does not exist:
+
+```json
+{
+  "mcpServers": {
+    "bigquery": {
+      "command": "/Users/YOU/.local/bin/uvx",
+      "args": ["data-platform-mcp"],
+      "env": {
+        "BQ_PROJECT": "your-gcp-project"
+      }
+    }
+  }
+}
+```
+
+Replace `/Users/YOU/.local/bin/uvx` with what `which uvx` printed. On Windows
+the path looks like `C:\\Users\\YOU\\.local\\bin\\uvx.exe`, and backslashes must be
+doubled in JSON.
+
+### 4. Restart Claude Desktop
+
+Fully quit and reopen — reloading the window is not enough. The server appears
+under the tools icon in the message box.
+
+### Managing several warehouses
+
+Rather than growing the JSON, put the environments in
+`~/.config/data-platform-mcp/config.toml` (see
+[Environments](#environments)). The Desktop config then needs no `env` block at
+all, and is identical on every machine:
+
+```json
+{
+  "mcpServers": {
+    "bigquery": {
+      "command": "/Users/YOU/.local/bin/uvx",
+      "args": ["data-platform-mcp"]
+    }
+  }
+}
+```
+
+This is the better shape for a team: one config file to share, and the JSON
+stops carrying project ids.
+
+### When it does not work
+
+Desktop hides the reason, so check in this order:
+
+1. **Run the doctor in a terminal.** It reports credentials, roles, dataset
+   visibility and regions in one pass, and is the fastest way to tell a setup
+   problem from a Desktop problem:
+   ```bash
+   BQ_PROJECT=your-gcp-project /Users/YOU/.local/bin/uvx data-platform-mcp doctor
+   ```
+2. **Read the logs.** macOS: `~/Library/Logs/Claude/mcp*.log`. `ENOENT` or
+   "command not found" there means the `command` path is wrong — go back to
+   `which uvx`.
+3. **Check the JSON parses.** A trailing comma silently disables every server:
+   ```bash
+   python3 -m json.tool ~/Library/Application\ Support/Claude/claude_desktop_config.json
+   ```
+
 
 ## Safety
 
