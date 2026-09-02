@@ -188,6 +188,33 @@ personal ADC.
 
 ---
 
+## Development
+
+```bash
+./.venv/bin/pip install -e ".[dev]"
+./.venv/bin/python -m pytest
+```
+
+The suite needs **no credentials and no network** — every test runs against
+fakes in `tests/conftest.py`, so it is deterministic and free. Layers:
+
+| File | Covers |
+|------|--------|
+| `test_protocol.py` | The MCP contract through a real in-memory client session: tool set, read-only annotations, generated schemas, `isError` on refusal |
+| `test_query_guard.py` | The cost gate — what runs, what is refused, what is handed back to the user, and what the caller is told about limits |
+| `test_payload_shape.py` | Response shapes against fake tables, including the partitioning trap and nested-field flattening |
+| `test_observability.py` | The audit trail, and the promise that SQL text never reaches it |
+| `test_config.py` | Settings resolution, and the missing-project error that used to be an import-time crash |
+| `test_errors.py` | Auth failures carry the command that fixes them |
+| `test_formatting.py` | The size and cost figures a user is asked to approve |
+
+A suite that passes on its first run proves nothing, so the guarantees above
+were checked by breaking them: reverting refusals to error-shaped returns,
+logging raw SQL, guessing partitioning from column names, removing the response
+budget, dropping `functools.wraps` from the audit wrapper, letting confirmation
+bypass the hard cap, silencing stale-table detection, and removing the
+allowlist check. Each one fails the suite.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
