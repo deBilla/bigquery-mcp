@@ -20,3 +20,7 @@ __pycache__/
 service-account*.json
 credentials*.json
 application_default_credentials.json
+
+# Build artifacts
+build/
+dist/

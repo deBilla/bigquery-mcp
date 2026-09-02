@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-platform-mcp"
+version = "0.1.0"
+description = "Read-only BigQuery MCP server for asking data questions in plain language"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Dimuthu Bhathiya" }]
+keywords = ["mcp", "model-context-protocol", "bigquery", "gcp", "google-cloud", "sql", "analytics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "mcp>=1.2.0,<2",
+    "google-cloud-bigquery>=3.25.0",
+    "google-auth>=2.28.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/deBilla/data-platform-mcp"
+Repository = "https://github.com/deBilla/data-platform-mcp"
+Issues = "https://github.com/deBilla/data-platform-mcp/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "anyio>=4.0"]
+
+[project.scripts]
+data-platform-mcp = "data_platform_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

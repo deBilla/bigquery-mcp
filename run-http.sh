@@ -13,8 +13,11 @@ cd "$(dirname "$0")"
 
 : "${BQ_PROJECT:?Set BQ_PROJECT to your GCP project ID}"
 export BQ_MCP_TRANSPORT="${BQ_MCP_TRANSPORT:-http}"
+# 0.0.0.0 so a container can reach the host. This transport has NO auth of its
+# own: anything that can reach the port queries as your credentials. Keep the
+# port off untrusted networks, or set BQ_MCP_HOST=127.0.0.1 for host-only use.
 export BQ_MCP_HOST="${BQ_MCP_HOST:-0.0.0.0}"
 export BQ_MCP_PORT="${BQ_MCP_PORT:-8765}"
 
 echo "Serving BigQuery MCP for project '$BQ_PROJECT' on http://$BQ_MCP_HOST:$BQ_MCP_PORT/mcp"
-exec ./.venv/bin/python server.py
+exec ./.venv/bin/data-platform-mcp

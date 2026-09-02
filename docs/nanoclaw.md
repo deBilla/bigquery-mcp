@@ -10,7 +10,7 @@ container; the agent reaches it through Docker's host gateway.
 
 ```
   ┌─ container (agent) ─┐         ┌──────────── host ────────────┐
-  │  Claude Agent SDK   │  HTTP   │  server.py  (HTTP transport) │
+  │  Claude Agent SDK   │  HTTP   │  data-platform-mcp (HTTP)    │
   │  mcpServers: {…url} ─┼────────▶  http://…:8765/mcp           │
   └─────────────────────┘         │  ADC creds (gcloud login)    │
         host.docker.internal      └──────────────────────────────┘
