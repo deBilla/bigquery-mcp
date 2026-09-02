@@ -68,6 +68,25 @@ def test_the_console_script_points_at_a_real_entry_point(project):
     assert callable(getattr(imported, attr))
 
 
+# Limits from the published registry schema
+# (static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json).
+# They are enforced only at publish time, which is after the tag is pushed and
+# after PyPI has already accepted the release -- so an over-long field cannot
+# be fixed in place, only in a new version. Asserting them here moves the
+# failure to a pull request. v0.1.0's registry publish failed on exactly this.
+REGISTRY_LIMITS = {"name": (3, 200), "title": (1, 100), "description": (1, 100)}
+
+
+@pytest.mark.parametrize("field,bounds", sorted(REGISTRY_LIMITS.items()))
+def test_manifest_fields_fit_the_registry_schema(manifest, field, bounds):
+    low, high = bounds
+    value = manifest[field]
+    assert low <= len(value) <= high, (
+        f"server.json {field} is {len(value)} chars; the registry allows "
+        f"{low}-{high} and rejects the publish otherwise"
+    )
+
+
 def test_the_manifest_declares_stdio_transport(manifest):
     assert manifest["packages"][0]["transport"]["type"] == "stdio"
 
