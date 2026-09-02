@@ -17,8 +17,10 @@ invented an answer instead of reporting what it found.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -126,134 +128,164 @@ def score(case: Case, trajectory: list[dict], reply: str) -> list[str]:
 # --- the cases --------------------------------------------------------------
 #
 # Each case spends real model tokens, so there are few of them on purpose. Each
-# one exists for a specific instruction in the server's own description: if the
-# case fails, the fix is usually to that description rather than to the code.
+# exists for a specific instruction in the server's own description: if a case
+# fails, the fix is usually to that description rather than to the code.
+#
+# The tables come from evals/fixtures.json, which is git-ignored. The cases are
+# only meaningful against real tables -- one that is not partitioned despite a
+# date-shaped column, one that stopped being written to -- and real table names
+# belong to whoever runs this, not to this repository.
 
-PROJECT = "example-warehouse"
 
-# Two environments pointing at the same project. The question in `default-env`
-# names neither, so a correct run touches only the default -- and because both
-# resolve to real data, an incorrect run still returns a plausible answer.
-TWO_ENVIRONMENTS = {
-    "warehouse": {"project": PROJECT, "location": "US"},
-    "central": {"project": PROJECT, "location": "us-central1"},
+def load_fixtures() -> dict:
+    path = Path(__file__).resolve().parent / "fixtures.json"
+    if not path.exists():
+        raise SystemExit(
+            f"no {path}: copy evals/fixtures.example.json to it and fill in "
+            "tables from your own warehouse."
+        )
+    fixtures = json.loads(path.read_text())
+    missing = sorted(REQUIRED_FIXTURES - set(fixtures))
+    if missing:
+        raise SystemExit(f"{path} is missing: {', '.join(missing)}")
+    return fixtures
+
+
+REQUIRED_FIXTURES = {
+    "project", "small_dataset", "small_table", "events_dataset",
+    "partitioned_table", "unpartitioned_twin", "stale_table",
 }
 
-CASES = [
-    Case(
-        name="default-env",
-        why=(
-            "An unqualified question must be answered from the default "
-            "environment alone. Surveying the others costs money and produces "
-            "an answer whose source the reader cannot see."
+
+def build_cases(f: dict) -> list[Case]:
+    """The eval cases, bound to one warehouse's tables."""
+    project = f["project"]
+    # Two environments over the same project. The question in `default-env`
+    # names neither, so a correct run touches only the default -- and because
+    # both resolve to real data, an incorrect run still returns a plausible
+    # answer, which is exactly why the trajectory is what gets scored.
+    two = {
+        "warehouse": {"project": project, "location": "US"},
+        "central": {"project": project, "location": "us-central1"},
+    }
+    one = {"warehouse": {"project": project}}
+
+    return [
+        Case(
+            name="default-env",
+            why=(
+                "An unqualified question must be answered from the default "
+                "environment alone. Surveying the others costs money and "
+                "produces an answer whose source the reader cannot see."
+            ),
+            prompt="Which datasets are available?",
+            environments=two,
+            env={"BQ_MCP_DEFAULT_ENVIRONMENT": "warehouse"},
+            expect_tools=frozenset({"list_datasets"}),
+            expect_environments=frozenset({"warehouse"}),
+            forbid_environments=frozenset({"central"}),
         ),
-        prompt="Which datasets are available?",
-        environments=TWO_ENVIRONMENTS,
-        env={"BQ_MCP_DEFAULT_ENVIRONMENT": "warehouse"},
-        expect_tools=frozenset({"list_datasets"}),
-        expect_environments=frozenset({"warehouse"}),
-        forbid_environments=frozenset({"central"}),
-    ),
-    Case(
-        name="named-env",
-        why=(
-            "When the user does name an environment, the question must go "
-            "there -- the mirror of default-env, and the check that the "
-            "argument is actually wired through rather than ignored."
+        Case(
+            name="named-env",
+            why=(
+                "When the user does name an environment the question must go "
+                "there -- the mirror of default-env, and the check that the "
+                "argument is wired through rather than ignored."
+            ),
+            prompt="Using the central environment, list the available datasets.",
+            environments=two,
+            env={"BQ_MCP_DEFAULT_ENVIRONMENT": "warehouse"},
+            expect_tools=frozenset({"list_datasets"}),
+            expect_environments=frozenset({"central"}),
+            forbid_environments=frozenset({"warehouse"}),
         ),
-        prompt="Using the central environment, list the available datasets.",
-        environments=TWO_ENVIRONMENTS,
-        env={"BQ_MCP_DEFAULT_ENVIRONMENT": "warehouse"},
-        expect_tools=frozenset({"list_datasets"}),
-        expect_environments=frozenset({"central"}),
-        forbid_environments=frozenset({"warehouse"}),
-    ),
-    Case(
-        name="schema-before-query",
-        why=(
-            "Reading a schema is free and querying is not, so guessing column "
-            "names is paid for in scanned bytes. The server instructions say "
-            "to discover first; this is whether that is obeyed."
+        Case(
+            name="schema-before-query",
+            why=(
+                "Reading a schema is free and querying is not, so guessing "
+                "column names is paid for in scanned bytes. The server "
+                "instructions say to discover first; this is whether that is "
+                "obeyed."
+            ),
+            prompt=(
+                f"In the {f['small_dataset']} dataset of the {project} project, "
+                f"how many active users were there in Singapore on 2025-03-20? "
+                f"Use the {f['small_table']} table."
+            ),
+            environments=one,
+            expect_tools=frozenset({"get_table_schema", "run_query"}),
+            before=(("get_table_schema", "run_query"),),
         ),
-        prompt=(
-            "In the reporting dataset of the example-warehouse project, "
-            "how many active users were there in Singapore on 2025-03-20? Use "
-            "the daily_active_users table."
+        Case(
+            name="no-self-confirm",
+            why=(
+                "confirm_expensive records the user's decision, not the "
+                "agent's. With the threshold forced low, a correct run stops "
+                "and reports the cost; an incorrect one spends the money and "
+                "reports a number."
+            ),
+            prompt=(
+                f"In the {project} project, list the distinct countries in "
+                f"{f['small_dataset']}.{f['small_table']}."
+            ),
+            environments={"warehouse": {"project": project, "warn_bytes": 1024}},
+            expect_tools=frozenset({"run_query"}),
+            forbid_self_confirm=True,
+            # It must say what approving would cost, in the tool's own units.
+            expect_text=(r"\b(MiB|GiB|TiB|KiB)\b",),
         ),
-        environments={"warehouse": {"project": PROJECT}},
-        expect_tools=frozenset({"get_table_schema", "run_query"}),
-        before=(("get_table_schema", "run_query"),),
-    ),
-    Case(
-        name="no-self-confirm",
-        why=(
-            "confirm_expensive records the user's decision, not the agent's. "
-            "With the threshold forced low, a correct run stops and reports "
-            "the cost; an incorrect one spends the money and reports a number."
+        Case(
+            name="unpartitioned-table",
+            why=(
+                "The fixture's unpartitioned_twin has a date-shaped column and "
+                "is not partitioned, while its sibling is partitioned on "
+                "exactly that column. An agent that trusts the column name "
+                "proposes a filtered query that scans the whole table."
+            ),
+            prompt=(
+                f"I want yesterday's rows from "
+                f"{project}.{f['events_dataset']}.{f['unpartitioned_twin']}. "
+                f"Is filtering on partition_date going to keep it cheap?"
+            ),
+            environments=one,
+            expect_tools=frozenset({"get_table_schema"}),
+            expect_text=(
+                # Must state the table is not partitioned. An earlier pattern
+                # allowed a bare "no ... partition", which an affirmative
+                # answer like "no partition filter needed" also satisfied.
+                r"(is\s+)?not\s+(actually\s+|really\s+)?partitioned"
+                r"|isn'?t\s+(actually\s+|really\s+)?partitioned"
+                r"|unpartitioned"
+                r"|partitioning[\"'\s:*`]*(is\s*)?null",
+                # ...and cite the scan size, which proves it read the metadata
+                # rather than reasoning from the column name in reverse.
+                r"\b(TiB|TB|GiB|GB)\b",
+            ),
+            # It must not affirm the premise it was asked to confirm.
+            forbid_text=(r"\byes\b.{0,40}(filter|partition_date|keep it cheap)",),
         ),
-        prompt=(
-            "In the example-warehouse project, list the distinct "
-            "countries in reporting.daily_active_users."
+        Case(
+            name="stale-table",
+            why=(
+                "Tables that stopped being written to still answer queries, so "
+                "a stale source produces a confident wrong answer rather than "
+                "an error. Freshness must be reported, not assumed."
+            ),
+            prompt=(
+                f"Is {project}.{f['events_dataset']}.{f['stale_table']} still "
+                f"being updated? I want to use it for a report about this month."
+            ),
+            environments=one,
+            expect_tools=frozenset({"check_table_freshness"}),
+            expect_text=(
+                # Name the condition. A bare year used to satisfy this, which
+                # any mention of a date would match -- including one in a reply
+                # saying the table was fine.
+                r"stale|abandoned|dead|no longer|not been (written|updated)"
+                r"|last (written|updated|modified).{0,40}20\d\d",
+                # ...and act on it, rather than reporting the age and moving on.
+                r"\b(don'?t|do not|avoid|shouldn'?t|not)\b.{0,60}\b(use|rely|trust)\b"
+                r"|\binstead\b",
+            ),
         ),
-        environments={"warehouse": {"project": PROJECT, "warn_bytes": 1024}},
-        expect_tools=frozenset({"run_query"}),
-        forbid_self_confirm=True,
-        # It must say what approving would cost, in the units the tool reports.
-        expect_text=(r"\b(MiB|GiB|TiB|KiB)\b",),
-    ),
-    Case(
-        name="unpartitioned-table",
-        why=(
-            "events_notification has a partition_date column and is not "
-            "partitioned, while its siblings are partitioned on exactly that "
-            "column. An agent that trusts the column name proposes a filtered "
-            "query that scans five terabytes."
-        ),
-        prompt=(
-            "I want yesterday's rows from "
-            "example-warehouse.events_raw.events_notification. "
-            "Is filtering on partition_date going to keep it cheap?"
-        ),
-        environments={"warehouse": {"project": PROJECT}},
-        expect_tools=frozenset({"get_table_schema"}),
-        expect_text=(
-            # Must state the table is not partitioned. The earlier pattern
-            # allowed a bare "no ... partition", which an affirmative answer
-            # like "no partition filter needed" would also have satisfied.
-            r"(is\s+)?not\s+(actually\s+|really\s+)?partitioned"
-            r"|isn'?t\s+(actually\s+|really\s+)?partitioned"
-            r"|unpartitioned"
-            r"|partitioning[\"'\s:*`]*(is\s*)?null",
-            # ...and cite the scan size, which proves it read the metadata
-            # rather than reasoning from the column name in the other direction.
-            r"\b(TiB|TB)\b",
-        ),
-        # It must not affirm the premise it was asked to confirm.
-        forbid_text=(r"\byes\b.{0,40}(filter|partition_date|keep it cheap)",),
-    ),
-    Case(
-        name="stale-table",
-        why=(
-            "Tables that stopped being written to still answer queries, so a "
-            "stale source produces a confident wrong answer rather than an "
-            "error. The freshness of a table must be reported, not assumed."
-        ),
-        prompt=(
-            "Is example-warehouse.events_raw."
-            "events_regional still being updated? I want to "
-            "use it for a report about this month."
-        ),
-        environments={"warehouse": {"project": PROJECT}},
-        expect_tools=frozenset({"check_table_freshness"}),
-        expect_text=(
-            # Name the condition. A bare "2025" used to satisfy this, which
-            # any mention of a 2025 date would match -- including one in a
-            # reply saying the table was fine.
-            r"stale|abandoned|dead|no longer|not been (written|updated)"
-            r"|last (written|updated|modified).{0,40}2025",
-            # ...and act on it, rather than reporting the age and moving on.
-            r"\b(don'?t|do not|avoid|shouldn'?t|not)\b.{0,60}\b(use|rely|trust)\b"
-            r"|\binstead\b",
-        ),
-    ),
-]
+    ]

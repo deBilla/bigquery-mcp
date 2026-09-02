@@ -12,8 +12,8 @@ almost every record, a field that is always empty, an identifier repeated three
 times per row.
 
 Usage:
-    python evals/measure.py                       # default environment
-    python evals/measure.py --environment central
+    python evals/measure.py --project P --dataset D --table T
+    python evals/measure.py --project P --dataset D --table T --environment central
 
 Output lands in evals/measurements/ (git-ignored). **Those files contain live
 table names and query results** -- redact before using any of it as a fixture.
@@ -102,9 +102,11 @@ async def measure(environment: str, dataset: str, table: str, project: str) -> l
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", default="")
-    parser.add_argument("--dataset", default="reporting")
-    parser.add_argument("--table", default="daily_active_users")
-    parser.add_argument("--project", default="example-warehouse")
+    # No defaults: these name tables in whoever runs this, and a
+    # placeholder that silently measures nothing is worse than an error.
+    parser.add_argument("--dataset", required=True)
+    parser.add_argument("--table", required=True)
+    parser.add_argument("--project", required=True)
     args = parser.parse_args()
 
     print(f"measuring {args.project}.{args.dataset}.{args.table}")

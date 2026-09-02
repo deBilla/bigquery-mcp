@@ -4,12 +4,12 @@ What `evals/measure.py` measured, and what changed because of it. Every number
 here came from running each call against a live BigQuery project through a real
 MCP client session — not from reading the code.
 
-## Run of 2026-09-02 · example-warehouse
+## Run of 2026-09-02
 
 Two tables, chosen as the extremes: a narrow reporting table and a GA4 event
 table with 218 fields once RECORDs are expanded.
 
-### `reporting.daily_active_users` — 3 columns, 155k rows
+### A narrow reporting table — 3 columns, 155k rows
 
 | Tool | ms | chars | ~tokens |
 | --- | ---: | ---: | ---: |
@@ -23,7 +23,7 @@ table with 218 fields once RECORDs are expanded.
 
 **~2,204 tokens for the whole session.** Nothing here needs attention.
 
-### `events_raw.events_click` — 218 fields, 6.7 TiB, 4.0B rows
+### A GA4 event table — 218 fields, 6.7 TiB, 4.0B rows
 
 | Tool | ms | chars | ~tokens | note |
 | --- | ---: | ---: | ---: | --- |
@@ -85,6 +85,6 @@ weak-pass replies above and asserts they fail.
 The behaviour the run recorded is worth keeping as a reference. On
 `unpartitioned-table` the agent read the metadata, dry-ran to price the trap at
 5.09 TiB / $31.79, refused it, and then went and found that the sibling table
-`events_in_app` — same 218 columns, same dataset — *is*
+`the partitioned sibling` — same 218 columns, same dataset — *is*
 partitioned on the same column. That is the failure this server was built to
 prevent, caught end to end.

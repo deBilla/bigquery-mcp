@@ -31,3 +31,4 @@ dist/
 # Eval output: contains live table names, query text and model replies.
 evals/results/
 evals/measurements/
+evals/fixtures.json

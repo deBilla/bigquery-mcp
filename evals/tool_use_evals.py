@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from scoring import CASES, Case, score  # noqa: E402
+from scoring import Case, build_cases, load_fixtures, score  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = Path(__file__).resolve().parent / "results"
@@ -129,13 +129,15 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
 
+    cases = build_cases(load_fixtures())
+
     if args.list:
-        for case in CASES:
+        for case in cases:
             print(f"{case.name}\n    {case.why}\n")
         return 0
 
-    selected = [c for c in CASES if not args.names or c.name in args.names]
-    unknown = set(args.names) - {c.name for c in CASES}
+    selected = [c for c in cases if not args.names or c.name in args.names]
+    unknown = set(args.names) - {c.name for c in cases}
     if unknown:
         print(f"unknown case(s): {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2

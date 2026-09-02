@@ -20,7 +20,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "evals"))
 
-from scoring import CASES, Case, score  # noqa: E402
+from scoring import Case, build_cases, score  # noqa: E402
+
+# Synthetic fixtures: these tests are about the scorer, not about any real
+# warehouse, so they must never need evals/fixtures.json to exist.
+FIXTURES = {
+    "project": "demo-project",
+    "small_dataset": "reporting",
+    "small_table": "daily_users",
+    "events_dataset": "events_raw",
+    "partitioned_table": "events_partitioned",
+    "unpartitioned_twin": "events_flat",
+    "stale_table": "events_abandoned",
+}
+CASES = build_cases(FIXTURES)
 
 
 def call(tool, environment=None, **arguments):
