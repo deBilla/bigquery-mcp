@@ -87,6 +87,22 @@ def test_manifest_fields_fit_the_registry_schema(manifest, field, bounds):
     )
 
 
+def test_the_readme_proves_ownership_of_the_pypi_package(manifest):
+    """The registry checks that the PyPI README carries the server name, as
+    proof that whoever owns the package also owns the namespace.
+
+    It can only check this against a README already on PyPI, so a missing
+    marker is discovered after the release is irreversibly published and costs
+    a version bump. v0.1.1 was spent on exactly that.
+    """
+    marker = f"mcp-name: {manifest['name']}"
+    readme = (ROOT / "README.md").read_text()
+    assert marker in readme, (
+        f"README.md must contain the literal line {marker!r}, or the registry "
+        "rejects the publish after PyPI has already accepted it"
+    )
+
+
 def test_the_manifest_declares_stdio_transport(manifest):
     assert manifest["packages"][0]["transport"]["type"] == "stdio"
 

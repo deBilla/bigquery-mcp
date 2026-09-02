@@ -10,7 +10,8 @@ The AI does the natural-language → SQL translation; this server just safely
 executes against BigQuery under **your own** Google credentials.
 
 - **Repo:** https://github.com/deBilla/bigquery-mcp
-- **Clone (SSH):** `git@github.com:deBilla/bigquery-mcp.git`
+- **PyPI:** [`data-platform-mcp`](https://pypi.org/project/data-platform-mcp/)
+- **MCP registry:** mcp-name: io.github.deBilla/data-platform-mcp
 
 ---
 
@@ -104,17 +105,14 @@ You need Python 3.11+ and the `gcloud` CLI installed.
 ### 1. Install
 
 The package is published as **`data-platform-mcp`** (`bigquery-mcp` was already
-taken on PyPI by an unrelated project). Once a release is tagged, no checkout is
-needed — the client can fetch and run it directly:
+taken on PyPI by an unrelated project). No checkout is needed — the client can
+fetch and run it directly:
 
 ```bash
 uvx data-platform-mcp --version
 ```
 
-> **Not yet published.** No version tag has been pushed, so use the source
-> install below until one is. See [Releasing](#releasing).
-
-**From source:**
+**From source**, for development:
 
 ```bash
 git clone git@github.com:deBilla/bigquery-mcp.git

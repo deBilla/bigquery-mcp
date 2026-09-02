@@ -3,7 +3,7 @@
   "name": "io.github.deBilla/data-platform-mcp",
   "title": "BigQuery Data Platform",
   "description": "Read-only BigQuery tools for plain-language data questions, with a cost gate on every query",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "url": "https://github.com/deBilla/bigquery-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "data-platform-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "transport": {
         "type": "stdio"
       },
