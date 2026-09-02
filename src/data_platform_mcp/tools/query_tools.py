@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 
 from ..clients import get_bigquery_client
-from ..config import require_settings
+from ..config import require_environment
 from ..errors import DataPlatformMCPError, explain_exception
 from ..formatting import format_cost, human_bytes, scan_estimate
 from ..registration import register_tool
@@ -42,7 +42,12 @@ READONLY_STATEMENT_TYPES = {"SELECT"}
 _MAX_PAYLOAD_CHARS = 40_000
 
 
-def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> dict:
+def run_query(
+    sql: str,
+    max_rows: int = 0,
+    confirm_expensive: bool = False,
+    environment: str = "",
+) -> dict:
     """Run a read-only (SELECT/WITH) SQL query against BigQuery and return rows.
 
     Cost safety: the query is ALWAYS dry-run first to estimate how much data it
@@ -63,10 +68,12 @@ def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> d
             uses the server's configured limit.
         confirm_expensive: Set True only after the user has agreed to a query
             previously flagged as costly. Leave False for the first attempt.
+        environment: Which configured BigQuery environment to query. Omit to
+            use the default. Call list_environments to see what exists.
     """
-    settings = require_settings()
-    client = get_bigquery_client(settings)
-    max_rows = max_rows if max_rows > 0 else settings.row_limit
+    env = require_environment(environment)
+    client = get_bigquery_client(env)
+    max_rows = max_rows if max_rows > 0 else env.row_limit
 
     from google.cloud import bigquery
 
@@ -75,32 +82,35 @@ def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> d
     try:
         dry = client.query(sql, job_config=dry_cfg)
     except Exception as exc:  # syntax errors, unknown tables, permission denials
-        explained = explain_exception(exc)
+        explained = explain_exception(exc, environment)
         # A credential or permission failure has a better message than anything
         # this function could add, so it passes through. Everything else is a
         # problem with the SQL, and saying so locates the fault for the caller.
         if explained is not exc:
             raise explained from exc
         raise DataPlatformMCPError(
-            f"The query failed validation and did not run: {exc}"
+            f"Environment '{env.name}': the query failed validation and did "
+            f"not run: {exc}"
         ) from exc
 
     if dry.statement_type not in READONLY_STATEMENT_TYPES:
         raise DataPlatformMCPError(
-            f"Only read-only SELECT queries are allowed; this is a "
+            f"Environment '{env.name}': only read-only SELECT queries are "
+            f"allowed; this is a "
             f"'{dry.statement_type}' statement. This server cannot write, "
             "create or delete anything."
         )
 
     est_bytes = dry.total_bytes_processed or 0
-    scan = scan_estimate(est_bytes, settings.cost_per_tib_usd)
+    scan = scan_estimate(est_bytes, env.cost_per_tib_usd)
 
     # 2a) Above the hard cap — never runs, regardless of confirmation.
-    if est_bytes > settings.max_bytes_billed:
+    if est_bytes > env.max_bytes_billed:
         raise DataPlatformMCPError(
-            f"This query would scan {scan['estimated_scan']} "
+            f"In environment '{env.name}', this query would scan "
+            f"{scan['estimated_scan']} "
             f"({format_cost(scan['estimated_cost_usd'])}), above this server's "
-            f"{human_bytes(settings.max_bytes_billed)} hard limit, so it did not "
+            f"{human_bytes(env.max_bytes_billed)} hard limit, so it did not "
             "run. Select fewer columns, or filter on a partition column if "
             "get_table_schema shows the table has one.\n"
             "Note that this cap is a guardrail on this tool, not a BigQuery "
@@ -110,8 +120,10 @@ def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> d
 
     # 2b) Costly but allowed — hand the decision back to the user. This is a
     # result, not an error: the agent is supposed to act on it.
-    if est_bytes > settings.warn_bytes and not confirm_expensive:
+    if est_bytes > env.warn_bytes and not confirm_expensive:
         return {
+            "environment": env.name,
+            "project": env.project,
             "status": "confirmation_required",
             "message": (
                 f"This query will scan about {scan['estimated_scan']} "
@@ -121,11 +133,11 @@ def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> d
                 "again with the same SQL and confirm_expensive=true."
             ),
             **scan,
-            "warn_threshold_bytes": settings.warn_bytes,
+            "warn_threshold_bytes": env.warn_bytes,
         }
 
     # 3) Real run with a hard byte cap as a second line of defence.
-    cfg = bigquery.QueryJobConfig(maximum_bytes_billed=settings.max_bytes_billed)
+    cfg = bigquery.QueryJobConfig(maximum_bytes_billed=env.max_bytes_billed)
     job = client.query(sql, job_config=cfg)
 
     rows: list[dict] = []
@@ -143,12 +155,14 @@ def run_query(sql: str, max_rows: int = 0, confirm_expensive: bool = False) -> d
         used += size
 
     result = {
+        "environment": env.name,
+        "project": env.project,
         "rows": rows,
         "row_count": len(rows),
         "truncated": stopped_for_size or len(rows) >= max_rows,
         "bytes_processed": job.total_bytes_processed,
         "cache_hit": job.cache_hit,
-        **scan_estimate(job.total_bytes_processed or 0, settings.cost_per_tib_usd),
+        **scan_estimate(job.total_bytes_processed or 0, env.cost_per_tib_usd),
     }
     if stopped_for_size:
         # Say so, rather than letting a size-limited page look like the whole

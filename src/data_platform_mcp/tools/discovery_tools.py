@@ -24,7 +24,7 @@ guess at ``UNNEST``.
 from __future__ import annotations
 
 from ..clients import get_bigquery_client
-from ..config import require_settings
+from ..config import require_environment
 from ..errors import DataPlatformMCPError
 from ..registration import register_tool
 
@@ -41,17 +41,17 @@ _MAX_TABLES = 500
 _UNPARTITIONED_WARNING_BYTES = 10 * 1024**3
 
 
-def _require_allowed(settings, dataset_id: str) -> None:
+def _require_allowed(env, dataset_id: str) -> None:
     """Reject a dataset outside the allowlist, as an error the client can see.
 
     Returning an ``{"error": ...}`` payload instead would leave ``isError``
     unset, so a refusal would arrive looking exactly like a result.
     """
-    if not settings.dataset_allowed(dataset_id):
-        allowed = ", ".join(sorted(settings.dataset_allowlist))
+    if not env.dataset_allowed(dataset_id):
+        allowed = ", ".join(sorted(env.dataset_allowlist))
         raise DataPlatformMCPError(
-            f"Dataset '{dataset_id}' is not in this server's allowlist. "
-            f"Readable datasets: {allowed}."
+            f"Dataset '{dataset_id}' is not in the allowlist for environment "
+            f"'{env.name}'. Readable datasets: {allowed}."
         )
 
 
@@ -101,43 +101,51 @@ def _partitioning(table) -> dict | None:
     return None
 
 
-def list_datasets() -> dict:
+def list_datasets(environment: str = "") -> dict:
     """List the BigQuery datasets available in the data platform project.
 
     Call this first to discover what data exists. Free — scans no data.
+
+    Args:
+        environment: Which configured BigQuery environment to use. Omit to
+            use the default. Call list_environments to see what exists.
     """
-    settings = require_settings()
-    client = get_bigquery_client(settings)
+    env = require_environment(environment)
+    client = get_bigquery_client(env)
     datasets = sorted(
         ds.dataset_id
-        for ds in client.list_datasets(project=settings.project)
-        if settings.dataset_allowed(ds.dataset_id)
+        for ds in client.list_datasets(project=env.project)
+        if env.dataset_allowed(ds.dataset_id)
     )
     return {
-        "project": settings.project,
-        "location": settings.location,
+        "environment": env.name,
+        "project": env.project,
+        "location": env.location,
         "count": len(datasets),
         "datasets": datasets,
     }
 
 
-def list_tables(dataset_id: str) -> dict:
+def list_tables(dataset_id: str, environment: str = "") -> dict:
     """List tables and views inside a dataset. Free — scans no data.
 
     Args:
         dataset_id: The dataset to inspect, e.g. "events_raw".
+        environment: Which configured BigQuery environment to use. Omit to
+            use the default. Call list_environments to see what exists.
     """
-    settings = require_settings()
-    _require_allowed(settings, dataset_id)
+    env = require_environment(environment)
+    _require_allowed(env, dataset_id)
 
     from google.cloud import bigquery
 
-    ref = bigquery.DatasetReference(settings.project, dataset_id)
+    ref = bigquery.DatasetReference(env.project, dataset_id)
     tables = [
         {"table_id": t.table_id, "type": t.table_type}
-        for t in get_bigquery_client(settings).list_tables(ref, max_results=_MAX_TABLES)
+        for t in get_bigquery_client(env).list_tables(ref, max_results=_MAX_TABLES)
     ]
     result = {
+        "environment": env.name,
         "dataset": dataset_id,
         "count": len(tables),
         "tables": tables,
@@ -150,7 +158,7 @@ def list_tables(dataset_id: str) -> dict:
     return result
 
 
-def get_table_schema(dataset_id: str, table_id: str) -> dict:
+def get_table_schema(dataset_id: str, table_id: str, environment: str = "") -> dict:
     """Get a table's columns, partitioning, size and freshness. Free — scans no data.
 
     Call this before writing a query, for two reasons beyond column names:
@@ -164,23 +172,26 @@ def get_table_schema(dataset_id: str, table_id: str) -> dict:
     Args:
         dataset_id: The dataset, e.g. "events_raw".
         table_id: The table or view name.
+        environment: Which configured BigQuery environment to use. Omit to
+            use the default. Call list_environments to see what exists.
     """
-    settings = require_settings()
-    _require_allowed(settings, dataset_id)
+    env = require_environment(environment)
+    _require_allowed(env, dataset_id)
 
     from google.cloud import bigquery
 
     ref = bigquery.TableReference(
-        bigquery.DatasetReference(settings.project, dataset_id), table_id
+        bigquery.DatasetReference(env.project, dataset_id), table_id
     )
-    table = get_bigquery_client(settings).get_table(ref)
+    table = get_bigquery_client(env).get_table(ref)
 
     columns = _flatten(table.schema)
     truncated = len(columns) > _MAX_FIELDS
     partitioning = _partitioning(table)
 
     result = {
-        "table": f"{settings.project}.{dataset_id}.{table_id}",
+        "environment": env.name,
+        "table": f"{env.project}.{dataset_id}.{table_id}",
         "type": table.table_type,
         "num_rows": table.num_rows,
         "size_bytes": table.num_bytes,
@@ -211,7 +222,7 @@ def get_table_schema(dataset_id: str, table_id: str) -> dict:
     return result
 
 
-def check_table_freshness(dataset_id: str, table_id: str = "") -> dict:
+def check_table_freshness(dataset_id: str, table_id: str = "", environment: str = "") -> dict:
     """Report when tables were last written, to catch stale or dead sources.
 
     Several plausible-looking tables on this platform stopped being updated
@@ -224,12 +235,14 @@ def check_table_freshness(dataset_id: str, table_id: str = "") -> dict:
         dataset_id: The dataset to check, e.g. "events_raw".
         table_id: A single table to check. Omit to report every table in the
             dataset, which is the faster way to spot a dead one.
+        environment: Which configured BigQuery environment to use. Omit to
+            use the default. Call list_environments to see what exists.
     """
     from datetime import datetime, timezone
 
-    settings = require_settings()
-    _require_allowed(settings, dataset_id)
-    client = get_bigquery_client(settings)
+    env = require_environment(environment)
+    _require_allowed(env, dataset_id)
+    client = get_bigquery_client(env)
     now = datetime.now(timezone.utc)
 
     def age(modified) -> int | None:
@@ -240,7 +253,7 @@ def check_table_freshness(dataset_id: str, table_id: str = "") -> dict:
 
         table = client.get_table(
             bigquery.TableReference(
-                bigquery.DatasetReference(settings.project, dataset_id), table_id
+                bigquery.DatasetReference(env.project, dataset_id), table_id
             )
         )
         rows = [
@@ -258,7 +271,7 @@ def check_table_freshness(dataset_id: str, table_id: str = "") -> dict:
         query = (
             "SELECT table_id, row_count, size_bytes, "
             "TIMESTAMP_MILLIS(last_modified_time) AS last_modified "
-            f"FROM `{settings.project}.{dataset_id}.__TABLES__` "
+            f"FROM `{env.project}.{dataset_id}.__TABLES__` "
             "ORDER BY last_modified_time DESC"
         )
         rows = [
@@ -274,6 +287,7 @@ def check_table_freshness(dataset_id: str, table_id: str = "") -> dict:
 
     stale = [r["table_id"] for r in rows if (r["days_since_modified"] or 0) > 30]
     result = {
+        "environment": env.name,
         "dataset": dataset_id,
         "checked_at": now.isoformat(),
         "count": len(rows),

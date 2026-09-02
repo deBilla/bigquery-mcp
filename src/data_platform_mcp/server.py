@@ -25,9 +25,9 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from . import __version__
-from .config import describe_settings
+from .config import describe_environments
 from .observability import configure_logging, logger
-from .tools import discovery_tools, query_tools
+from .tools import discovery_tools, environment_tools, query_tools
 
 
 def _instructions() -> str:
@@ -56,20 +56,27 @@ def _instructions() -> str:
         "their money on your guess.\n\n"
         "REPORT LIMITS RATHER THAN HIDING THEM. When a result carries "
         "`truncated` or `stopped_for_size`, the rows shown are a partial "
-        "answer; say so instead of summarising them as the whole."
+        "answer; say so instead of summarising them as the whole.\n\n"
+        "PICK THE ENVIRONMENT FROM THE USER'S WORDS. Every tool takes an "
+        "optional `environment`; set it from wording like 'in prod' or 'on "
+        "staging', and omit it to use the default. Never guess a name — call "
+        "list_environments if unsure. Each result echoes back the environment "
+        "it came from, and answering from the wrong one is invisible in the "
+        "reply, so when a question does not name an environment, answer from "
+        "the default alone rather than surveying them all."
     )
     try:
-        configured = describe_settings()
+        configured = describe_environments()
     except Exception:
         # Misconfiguration must surface when a tool runs, not break startup and
         # hide every tool from the client.
         configured = ""
-    return f"{base}\n\nConfigured target: {configured}" if configured else base
+    return f"{base}\n\nConfigured environments:\n{configured}" if configured else base
 
 
 mcp = FastMCP("data-platform", instructions=_instructions())
 
-for module in (discovery_tools, query_tools):
+for module in (environment_tools, discovery_tools, query_tools):
     module.register(mcp)
 
 
@@ -100,6 +107,14 @@ def _run_server() -> None:
 
 def main() -> None:
     import argparse
+    import sys
+
+    # 'setup' forwards every remaining argument to the setup script, so it has
+    # to be dispatched before argparse sees flags it knows nothing about.
+    if sys.argv[1:2] == ["setup"]:
+        from .provisioning import run_setup
+
+        raise SystemExit(run_setup(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(
         prog="data-platform-mcp",
@@ -113,11 +128,13 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "doctor"],
+        choices=["serve", "doctor", "setup"],
         default="serve",
         help=(
             "'serve' (default) runs the server; 'doctor' checks that this "
-            "machine can reach BigQuery and reports how to fix what it cannot."
+            "machine can reach BigQuery and reports how to fix what it cannot; "
+            "'setup --project X' creates the read-only service account (pass "
+            "--help after it for its own options)."
         ),
     )
     args = parser.parse_args()

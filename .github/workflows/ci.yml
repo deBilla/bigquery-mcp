@@ -130,8 +130,8 @@ jobs:
           problems = []
           # Guards the exact failure an unpinned mcp dependency caused before:
           # a package that installs cleanly and dies on the first request.
-          if len(tools) != 5:
-              problems.append(f"expected 5 tools, got {len(tools)}")
+          if len(tools) != 6:
+              problems.append(f"expected 6 tools, got {len(tools)}")
           # A tool that loses its annotations stops declaring itself read-only
           # to the client, which is how this server describes what it is.
           for t in tools:
@@ -149,6 +149,16 @@ jobs:
               print(f"::error::{problem}")
           sys.exit(1 if problems else 0)
           PY
+
+      # The setup script ships as package data. If that declaration is ever
+      # dropped, `data-platform-mcp setup` breaks for installed users only --
+      # never in a checkout, where the file sits on disk regardless.
+      - name: Assert the setup script ships in the wheel
+        run: |
+          script=$(/tmp/smoke/bin/python -c 'from importlib import resources as r; print(r.files("data_platform_mcp") / "scripts" / "setup-service-account.sh")')
+          test -f "$script" || { echo "::error::setup script missing from the installed package"; exit 1; }
+          bash -n "$script"
+          echo "setup script ships and parses: $script"
 
       - uses: actions/upload-artifact@v4
         with:

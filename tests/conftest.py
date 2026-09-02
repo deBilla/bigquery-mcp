@@ -33,7 +33,11 @@ from data_platform_mcp import clients, config  # noqa: E402
 
 
 def clear_caches() -> None:
+    # _lookup_table is cached separately from get_settings and derived from it,
+    # so clearing only the latter leaves stale aliases resolving to environments
+    # from the previous test. Both, always.
     config.get_settings.cache_clear()
+    config._lookup_table.cache_clear()
     clients.reset_clients()
 
 

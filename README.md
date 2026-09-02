@@ -22,6 +22,7 @@ executes against BigQuery under **your own** Google credentials.
 | `list_tables` | List tables/views in a dataset | free |
 | `get_table_schema` | Columns (nested paths expanded), **partitioning**, size, row count | free |
 | `check_table_freshness` | When each table was last written — catches stale sources | free |
+| `list_environments` | Which BigQuery environments are configured, and the default | free |
 | `run_query` | Run a validated, read-only `SELECT` and return rows | scans data |
 
 Only `run_query` costs anything, so the discovery tools are the ones to spend
@@ -34,6 +35,63 @@ first. Two of them exist to prevent specific, repeated mistakes:
 - **`check_table_freshness` finds tables that stopped being written to** without
   being dropped. Those return stale data rather than an error, which is the
   failure mode nobody notices.
+
+---
+
+## Environments
+
+One server answers questions about several targets — a warehouse and its
+staging copy, or two regions of the same project. Every tool takes an optional
+`environment`; omitting it uses the default.
+
+```toml
+# ~/.config/data-platform-mcp/config.toml
+default_environment = "warehouse"
+
+[environments.warehouse]
+project = "my-data-platform"
+impersonate = "data-platform-mcp-ro@my-data-platform.iam.gserviceaccount.com"
+dataset_allowlist = ["sales", "events"]
+
+[environments.central]          # same project, different region
+project = "my-data-platform"
+location = "us-central1"
+```
+
+See [`config.toml.example`](config.toml.example) for every setting, or set
+`BQ_MCP_ENVIRONMENTS` to the same structure as JSON. **A single `BQ_PROJECT`
+still works unchanged** — it becomes one environment named `default`.
+
+An environment can be named by its own name, an alias, the built-in shorthands
+(`prod`, `stg`, `dev`, `live`) or its project id. An **unknown** name is an
+error naming the valid options, never a silent fall back to the default: a typo
+that answered a production question from staging would be invisible in the
+reply. Every result echoes back the environment it came from.
+
+Regions are why this matters most here. BigQuery cannot query across locations,
+and its error for trying names neither location, so it reads as a missing
+table. One environment per location; `doctor` reports which datasets are where.
+
+---
+
+## Read-only as a property of the identity
+
+The SELECT-only guard and the `readOnlyHint` annotations are promises about
+this code. Pointing the server at a service account that holds only
+`roles/bigquery.jobUser` and a dataset-scoped `roles/bigquery.dataViewer` makes
+it a fact about the credentials — enforced by IAM whatever the code does, and
+whatever your own roles allow:
+
+```bash
+data-platform-mcp setup --project my-data-platform --datasets sales,events
+```
+
+Creates the account, grants those two roles, and gives you
+`roles/iam.serviceAccountTokenCreator` on it so the server can impersonate it.
+Add `--dry-run` to see the commands first; it is safe to re-run.
+
+With `--datasets`, the dataset allowlist stops being an `if` statement in this
+process and becomes a grant Google enforces.
 
 ---
 
@@ -187,6 +245,10 @@ run_query(sql)
 
 | Var | Default | Meaning |
 |-----|---------|---------|
+| `BQ_MCP_ENVIRONMENTS` | _(none)_ | JSON map of environment name to settings. Takes precedence over the config file. |
+| `BQ_MCP_DEFAULT_ENVIRONMENT` | _(safest, else first)_ | Environment used when a call omits `environment`. Prefers a staging/dev environment when unset. |
+| `BQ_MCP_CONFIG` | `~/.config/data-platform-mcp/config.toml` | Path to the TOML config file |
+| `BQ_IMPERSONATE_SERVICE_ACCOUNT` | _(none)_ | Read-only service account to impersonate |
 | `BQ_PROJECT` | _(ADC project)_ | GCP project ID whose BigQuery datasets you query. Falls back to the project associated with your credentials; tools error with instructions if neither is set. |
 | `BQ_LOCATION` | `US` | BigQuery location |
 | `BQ_WARN_BYTES` | `1073741824` (1 GB) | Above this, ask the user to confirm before running |
@@ -252,7 +314,8 @@ fakes in `tests/conftest.py`, so it is deterministic and free. Layers:
 | `test_payload_shape.py` | Response shapes against fake tables, including the partitioning trap and nested-field flattening |
 | `test_observability.py` | The audit trail, and the promise that SQL text never reaches it |
 | `test_diagnostics.py` | `doctor`'s report, including the region and allowlist failures it exists to catch early |
-| `test_config.py` | Settings resolution, and the missing-project error that used to be an import-time crash |
+| `test_environments.py` | Routing between environments, per-environment limits, and impersonation targeting |
+| `test_config.py` | The environment registry, aliases, the TOML file, and the missing-project error that used to be an import-time crash |
 | `test_errors.py` | Auth failures carry the command that fixes them |
 | `test_formatting.py` | The size and cost figures a user is asked to approve |
 

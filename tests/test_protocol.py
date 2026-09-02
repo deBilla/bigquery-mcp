@@ -19,6 +19,7 @@ from data_platform_mcp.server import _instructions, mcp
 pytestmark = pytest.mark.anyio
 
 EXPECTED_TOOLS = {
+    "list_environments",
     "list_datasets",
     "list_tables",
     "get_table_schema",
@@ -51,6 +52,17 @@ async def test_all_tools_declare_themselves_read_only():
 async def test_every_tool_documents_itself():
     for tool in await _tools():
         assert tool.description, f"{tool.name} has no description"
+        if tool.name != "list_environments":
+            # Without a documented `environment`, an agent cannot route a
+            # question to the right warehouse and will silently use the default.
+            assert "environment" in tool.inputSchema["properties"], tool.name
+
+
+async def test_only_the_config_tool_is_closed_world():
+    """Everything else reaches out to BigQuery; list_environments does not."""
+    tools = await _tools()
+    closed = {t.name for t in tools if t.annotations.openWorldHint is False}
+    assert closed == {"list_environments"}
 
 
 async def test_instrumentation_did_not_alter_the_schemas():
@@ -59,7 +71,7 @@ async def test_instrumentation_did_not_alter_the_schemas():
     tools = {t.name: t for t in await _tools()}
 
     assert set(tools["run_query"].inputSchema["properties"]) == {
-        "sql", "max_rows", "confirm_expensive"
+        "sql", "max_rows", "confirm_expensive", "environment"
     }
     assert tools["run_query"].inputSchema["required"] == ["sql"]
     assert tools["get_table_schema"].inputSchema["required"] == [
@@ -67,7 +79,8 @@ async def test_instrumentation_did_not_alter_the_schemas():
     ]
     # table_id is optional: omitting it checks the whole dataset.
     assert tools["check_table_freshness"].inputSchema["required"] == ["dataset_id"]
-    assert tools["list_datasets"].inputSchema["properties"] == {}
+    # list_environments reports this server's own config and takes nothing.
+    assert tools["list_environments"].inputSchema["properties"] == {}
 
 
 async def test_a_refusal_arrives_as_a_protocol_error(fake_client):

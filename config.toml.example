@@ -1,0 +1,59 @@
+# data-platform-mcp configuration.
+#
+# Copy to ~/.config/data-platform-mcp/config.toml (or point BQ_MCP_CONFIG at
+# it). With this file in place, adding the server to a client needs no
+# environment variables at all:
+#
+#     claude mcp add bigquery -- uvx data-platform-mcp
+#
+# Every setting can be overridden by the matching environment variable, so a
+# shared committed file plus a local override works fine.
+
+# Environment used when a tool call omits the `environment` argument. With no
+# value here, a staging/dev environment is preferred over production, so an
+# unqualified question does not land on the expensive warehouse by default.
+default_environment = "warehouse"
+
+
+[environments.warehouse]
+project = "my-data-platform"
+
+# BigQuery cannot query across locations, and its error for trying names
+# neither location — it reads as a missing table. One environment per location.
+location = "US"
+
+# Read-only service account to impersonate. This is what makes "read-only" a
+# property of the identity rather than a promise about the code: point it at an
+# account holding only jobUser and a dataset-scoped dataViewer and no tool can
+# mutate anything, whatever your own roles allow. Create it with:
+#
+#     data-platform-mcp setup --project my-data-platform --datasets sales,events
+#
+# Each person using the server needs roles/iam.serviceAccountTokenCreator on it.
+impersonate = "data-platform-mcp-ro@my-data-platform.iam.gserviceaccount.com"
+
+# Datasets this environment may read. Omit for all of them. Prefer granting the
+# service account dataset-scoped dataViewer to match: then the list is enforced
+# by IAM rather than by an `if` statement in this process.
+dataset_allowlist = ["sales", "events"]
+
+# Above this a query is returned for confirmation instead of run; above
+# max_bytes_billed it never runs at all. Both are guardrails on this tool, not
+# BigQuery limits.
+warn_bytes = 1073741824          # 1 GiB
+max_bytes_billed = 5368709120    # 5 GiB
+
+# Default rows returned, to keep responses small.
+row_limit = 200
+
+
+# Datasets in another region need their own environment: same project, different
+# location. `doctor` lists which datasets are where.
+[environments.central]
+project = "my-data-platform"
+location = "us-central1"
+dataset_allowlist = ["raw_events"]
+
+# Extra names the agent may use for this environment. 'prod', 'stg', 'dev' and
+# the project id are understood already.
+aliases = ["raw"]

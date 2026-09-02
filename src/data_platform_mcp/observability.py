@@ -60,6 +60,8 @@ _FINGERPRINTED_ARGS = frozenset({"sql"})
 # Result fields worth lifting into the audit record, so a run can be costed and
 # a truncated response spotted without re-reading the payload.
 _AUDIT_RESULT_FIELDS = (
+    "environment",
+    "project",
     "count",
     "row_count",
     "truncated",
@@ -170,19 +172,27 @@ def _finish_ok(record: dict, fn: Callable, result: Any, started: float) -> None:
     record["error"] = None
     _write_audit(record)
     logger.info(
-        "%s ok %sms %sB", fn.__name__, record["duration_ms"], record["bytes"]
+        "%s ok env=%s %sms %sB",
+        fn.__name__,
+        record.get("environment"),
+        record["duration_ms"],
+        record["bytes"],
     )
 
 
 def _finish_error(record: dict, fn: Callable, exc: Exception, started: float) -> Exception:
     record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    # A failed call never reaches the result dict, so the environment has to
+    # come from the arguments -- otherwise the audit trail cannot say which
+    # warehouse a failure was about, which is most of its value.
+    record.setdefault("environment", record["arguments"].get("environment"))
     record["error"] = type(exc).__name__
     record["error_message"] = str(exc)[:500]
     _write_audit(record)
     logger.error("%s failed: %s: %s", fn.__name__, type(exc).__name__, exc)
     # Replace opaque credential failures with something the agent can act on;
     # anything else propagates unchanged.
-    return explain_exception(exc)
+    return explain_exception(exc, record["arguments"].get("environment", ""))
 
 
 def instrument(fn: Callable) -> Callable:

@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.deBilla/data-platform-mcp",
   "title": "BigQuery Data Platform",
-  "description": "Read-only BigQuery tools for asking data questions in plain language, with a cost gate in front of every query",
+  "description": "Read-only BigQuery tools for asking data questions in plain language, across named environments, with a cost gate in front of every query",
   "version": "0.1.0",
   "repository": {
     "url": "https://github.com/deBilla/bigquery-mcp",
@@ -17,6 +17,30 @@
         "type": "stdio"
       },
       "environmentVariables": [
+        {
+          "name": "BQ_MCP_ENVIRONMENTS",
+          "description": "JSON map of environment name to BigQuery settings (project, location, impersonate, dataset_allowlist, byte caps). Omit when using a config file at ~/.config/data-platform-mcp/config.toml.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_MCP_DEFAULT_ENVIRONMENT",
+          "description": "Environment used when a tool call omits the environment argument.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_MCP_CONFIG",
+          "description": "Path to a TOML config file, overriding ~/.config/data-platform-mcp/config.toml.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_IMPERSONATE_SERVICE_ACCOUNT",
+          "description": "Read-only service account to impersonate, making read-only a property of the identity rather than of this code. Create it with `data-platform-mcp setup`.",
+          "isRequired": false,
+          "isSecret": false
+        },
         {
           "name": "BQ_PROJECT",
           "description": "GCP project whose BigQuery datasets are queried. Falls back to the project associated with Application Default Credentials.",

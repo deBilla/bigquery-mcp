@@ -8,6 +8,8 @@ the *fix* being printed, not the wording around it -- a diagnostic that says
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from google.api_core import exceptions as api_exceptions
 
@@ -49,6 +51,60 @@ def report(capsys):
 FAILED = f"[{diagnostics.FAIL}]"
 WARNED = f"[{diagnostics.WARN}]"
 SKIPPED = f"[{diagnostics.SKIP}]"
+
+
+def test_impersonation_is_skipped_when_not_configured(doctor, capsys):
+    diagnostics.run_doctor()
+    assert f"{SKIPPED} impersonation not configured" in report(capsys)
+
+
+def test_a_failed_impersonation_names_the_role_to_grant(doctor, monkeypatch, capsys):
+    """The check that makes read-only a property of the identity. A silent
+    failure here means the server is quietly running as the operator."""
+    monkeypatch.setenv("BQ_MCP_ENVIRONMENTS", json.dumps(
+        {"prod": {"project": "p", "impersonate": "ro@p.iam.gserviceaccount.com"}}))
+    clear_caches()
+
+    def refuse(impersonate=""):
+        raise RuntimeError("403 iam.serviceAccounts.getAccessToken denied")
+
+    monkeypatch.setattr("data_platform_mcp.clients.get_credentials", refuse)
+
+    assert diagnostics.run_doctor() == 1
+    out = report(capsys)
+    assert FAILED in out
+    assert "ro@p.iam.gserviceaccount.com" in out
+    assert "roles/iam.serviceAccountTokenCreator" in out
+
+
+def test_every_environment_is_checked_and_labelled(doctor, monkeypatch, capsys):
+    monkeypatch.setenv("BQ_MCP_ENVIRONMENTS", json.dumps({
+        "warehouse": {"project": "demo-warehouse"},
+        "central": {"project": "demo-central", "location": "us-central1"},
+    }))
+    monkeypatch.setenv("BQ_MCP_DEFAULT_ENVIRONMENT", "warehouse")
+    clear_caches()
+
+    diagnostics.run_doctor()
+    out = report(capsys)
+    assert "environment: warehouse (default) -> demo-warehouse" in out
+    assert "environment: central -> demo-central" in out
+    # Each environment is checked in its own location, not the first one's.
+    assert "location us-central1" in out
+
+
+def test_one_broken_environment_fails_the_report(doctor, monkeypatch, capsys):
+    """A healthy environment listed alongside a broken one must not make the
+    command exit 0 -- the broken one is still unusable."""
+    monkeypatch.setenv("BQ_MCP_ENVIRONMENTS", json.dumps({
+        "good": {"project": "demo-warehouse"},
+        "bad": {"project": "demo-warehouse", "dataset_allowlist": ["nonexistent"]},
+    }))
+    clear_caches()
+
+    assert diagnostics.run_doctor() == 1
+    out = report(capsys)
+    assert "nonexistent" in out and FAILED in out
 
 
 def test_a_healthy_setup_passes(doctor, capsys):

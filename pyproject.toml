@@ -43,6 +43,11 @@ data-platform-mcp = "data_platform_mcp.server:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The one-time setup script ships inside the package so `data-platform-mcp
+# setup` works from a plain `uvx data-platform-mcp`, with no checkout to clone.
+[tool.setuptools.package-data]
+data_platform_mcp = ["scripts/*.sh"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

@@ -21,7 +21,12 @@ from __future__ import annotations
 
 import sys
 
-from .config import Settings, config_summary_lines, get_settings, require_settings
+from .config import (
+    Environment,
+    config_path,
+    config_summary_lines,
+    get_settings,
+)
 
 OK = "  ok  "
 FAIL = " FAIL "
@@ -50,19 +55,6 @@ def _fix(text: str) -> None:
         print(f"         {line}")
 
 
-def _check_configuration() -> Settings | None:
-    try:
-        settings = require_settings()
-    except Exception as exc:
-        _line(FAIL, "configuration")
-        _fix(str(exc))
-        return None
-    _line(OK, f"configuration: project {settings.project}, location {settings.location}")
-    for line in config_summary_lines(settings):
-        print(f"         {line}")
-    return settings
-
-
 def _check_credentials() -> bool:
     try:
         import google.auth
@@ -88,7 +80,55 @@ def _check_credentials() -> bool:
     return True
 
 
-def _check_can_run_a_query(settings: Settings) -> bool:
+def _check_environment_header(env: Environment, default: str) -> bool:
+    marker = " (default)" if env.name == default else ""
+    print(f"environment: {env.name}{marker} -> {env.project or '(no project)'}")
+    if not env.project:
+        _line(FAIL, "no BigQuery project configured")
+        _fix(
+            "Set BQ_PROJECT, or give this environment a 'project' in the "
+            "config file.\n"
+            "Fix:  BQ_PROJECT=my-gcp-project"
+        )
+        return False
+    for line in config_summary_lines(env):
+        print(f"         {line}")
+    return True
+
+
+def _check_impersonation(env: Environment) -> bool:
+    """Prove the service account can actually be impersonated.
+
+    This is the check that makes read-only a property of the identity rather
+    than a promise about the code, so a silent failure here means the server is
+    quietly running as the operator instead.
+    """
+    if not env.impersonate:
+        _line(SKIP, "impersonation not configured (using your own credentials)")
+        return True
+
+    from google.auth.transport.requests import Request
+
+    from .clients import get_credentials
+
+    try:
+        credentials = get_credentials(env.impersonate)
+        credentials.refresh(Request())
+    except Exception as exc:
+        _line(FAIL, f"impersonate {env.impersonate}")
+        _fix(
+            f"{str(exc)[:250]}\n"
+            "Fix:  gcloud iam service-accounts add-iam-policy-binding \\\n"
+            f"        {env.impersonate} \\\n"
+            "        --member=user:YOUR_EMAIL \\\n"
+            "        --role=roles/iam.serviceAccountTokenCreator"
+        )
+        return False
+    _line(OK, f"impersonate {env.impersonate}")
+    return True
+
+
+def _check_can_run_a_query(env: Environment) -> bool:
     """One real query, so job permission is proven rather than assumed.
 
     ``SELECT 1`` reads no table and scans no bytes, so this costs nothing and
@@ -97,58 +137,58 @@ def _check_can_run_a_query(settings: Settings) -> bool:
     from .clients import get_bigquery_client
 
     try:
-        client = get_bigquery_client(settings)
+        client = get_bigquery_client(env)
         list(client.query("SELECT 1 AS ok").result())
     except Exception as exc:
-        _line(FAIL, f"run a query in {settings.project}")
+        _line(FAIL, f"run a query in {env.project}")
         _fix(
             f"{str(exc)[:250]}\n"
-            f"Fix:  grant roles/bigquery.jobUser on {settings.project}, and "
+            f"Fix:  grant roles/bigquery.jobUser on {env.project}, and "
             "enable the BigQuery API."
         )
         return False
-    _line(OK, f"run a query in {settings.project} (location {settings.location})")
+    _line(OK, f"run a query in {env.project} (location {env.location})")
     return True
 
 
-def _check_datasets(settings: Settings) -> tuple[bool, list[str]]:
+def _check_datasets(env: Environment) -> tuple[bool, list[str]]:
     """List datasets, and confirm every allowlisted one actually exists."""
     from .clients import get_bigquery_client
 
     try:
-        client = get_bigquery_client(settings)
-        names = [d.dataset_id for d in client.list_datasets(project=settings.project)]
+        client = get_bigquery_client(env)
+        names = [d.dataset_id for d in client.list_datasets(project=env.project)]
     except Exception as exc:
-        _line(FAIL, f"list datasets in {settings.project}")
+        _line(FAIL, f"list datasets in {env.project}")
         _fix(
             f"{str(exc)[:250]}\n"
             f"Fix:  grant roles/bigquery.metadataViewer (or dataViewer) on "
-            f"{settings.project}."
+            f"{env.project}."
         )
         return False, []
 
-    if not settings.dataset_allowlist:
+    if not env.dataset_allowlist:
         _line(OK, f"{len(names)} datasets visible (no allowlist; all are readable)")
         return True, names
 
-    missing = sorted(settings.dataset_allowlist - set(names))
+    missing = sorted(env.dataset_allowlist - set(names))
     if missing:
         _line(FAIL, f"allowlisted datasets not found: {', '.join(missing)}")
         _fix(
             "BQ_DATASET_ALLOWLIST names datasets that do not exist or are not "
-            f"visible in {settings.project}. Every tool call for these will be "
+            f"visible in {env.project}. Every tool call for these will be "
             "refused.\nFix:  correct the names, or grant read access to them."
         )
         return False, names
     _line(
         OK,
-        f"{len(settings.dataset_allowlist)} allowlisted dataset(s) exist "
+        f"{len(env.dataset_allowlist)} allowlisted dataset(s) exist "
         f"({len(names)} visible in total)",
     )
     return True, names
 
 
-def _check_locations(settings: Settings, names: list[str]) -> bool:
+def _check_locations(env: Environment, names: list[str]) -> bool:
     """Find datasets this server's location cannot reach.
 
     A dataset in another region is not a misconfiguration on its own -- but one
@@ -162,9 +202,9 @@ def _check_locations(settings: Settings, names: list[str]) -> bool:
         _line(SKIP, "dataset locations (no datasets to check)")
         return True
 
-    client = get_bigquery_client(settings)
-    if settings.dataset_allowlist:
-        checking = sorted(settings.dataset_allowlist)
+    client = get_bigquery_client(env)
+    if env.dataset_allowlist:
+        checking = sorted(env.dataset_allowlist)
     else:
         checking = sorted(names)
     capped = len(checking) > _LOCATION_LIMIT
@@ -180,7 +220,7 @@ def _check_locations(settings: Settings, names: list[str]) -> bool:
     with ThreadPoolExecutor(max_workers=_LOCATION_WORKERS) as pool:
         found = list(pool.map(location_of, checking))
 
-    want = settings.location.upper()
+    want = env.location.upper()
     elsewhere: dict[str, list[str]] = {}
     for name, location in found:
         if location and location != want:
@@ -188,10 +228,10 @@ def _check_locations(settings: Settings, names: list[str]) -> bool:
 
     scope = f" (first {len(checking)} of {len(names)})" if capped else ""
     if not elsewhere:
-        _line(OK, f"all {len(checking)} datasets are in {settings.location}{scope}")
+        _line(OK, f"all {len(checking)} datasets are in {env.location}{scope}")
         return True
 
-    blocked = sorted(settings.dataset_allowlist.intersection(
+    blocked = sorted(env.dataset_allowlist.intersection(
         d for group in elsewhere.values() for d in group
     ))
     status = FAIL if blocked else WARN
@@ -199,12 +239,12 @@ def _check_locations(settings: Settings, names: list[str]) -> bool:
     _line(
         status,
         f"{total} of {len(checking)} datasets are outside location "
-        f"{settings.location}{scope}",
+        f"{env.location}{scope}",
     )
     for location, group in sorted(elsewhere.items()):
         _fix(f"{location}: {', '.join(sorted(group))}")
     _fix(
-        f"BigQuery cannot query these from {settings.location}, and cannot join "
+        f"BigQuery cannot query these from {env.location}, and cannot join "
         "them with datasets that are in it. The error at query time names "
         "neither location, so it reads as a missing table.\n"
         + (
@@ -238,26 +278,42 @@ def _check_audit_log() -> bool:
 
 
 def run_doctor() -> int:
-    """Print a readiness report. Returns a process exit code."""
+    """Print a per-environment readiness report. Returns a process exit code."""
+    path = config_path()
     print("data-platform-mcp doctor")
+    print(f"config file: {path}{'' if path.exists() else '  (not found)'}")
     print()
 
-    settings = _check_configuration()
-    if settings is None:
-        print()
-        print("Fix the item marked FAIL above, then re-run.")
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        _line(FAIL, "configuration")
+        _fix(str(exc))
         return 1
 
+    # Credentials are shared across environments, so a failure here would
+    # repeat under every one of them and bury the difference between them.
     healthy = _check_credentials()
-    if healthy:
-        healthy &= _check_can_run_a_query(settings)
-        datasets_ok, names = _check_datasets(settings)
-        healthy &= datasets_ok
-        healthy &= _check_locations(settings, names)
-    else:
-        # Every remaining check would fail for the same reason, and a wall of
-        # identical failures hides the one that matters.
-        _line(SKIP, "BigQuery checks (no usable credentials)")
+    print()
+
+    for env in settings.environments:
+        if not _check_environment_header(env, settings.default_environment):
+            healthy = False
+            print()
+            continue
+        if healthy:
+            results = [
+                _check_impersonation(env),
+                _check_can_run_a_query(env),
+            ]
+            datasets_ok, names = _check_datasets(env)
+            results.append(datasets_ok)
+            results.append(_check_locations(env, names))
+            healthy = all(results) and healthy
+        else:
+            _line(SKIP, "BigQuery checks (no usable credentials)")
+        print()
+
     _check_audit_log()
 
     print()
