@@ -318,6 +318,28 @@ fakes in `tests/conftest.py`, so it is deterministic and free. Layers:
 | `test_config.py` | The environment registry, aliases, the TOML file, and the missing-project error that used to be an import-time crash |
 | `test_errors.py` | Auth failures carry the command that fixes them |
 | `test_formatting.py` | The size and cost figures a user is asked to approve |
+| `test_eval_scoring.py` | The eval scorer, fed the trajectories each case exists to reject |
+
+### Evals
+
+Two further layers need live credentials, so they are not part of `pytest`:
+`evals/measure.py` records what a client actually receives from each tool, and
+`evals/tool_use_evals.py` asks real questions through the `claude` CLI and
+scores the **trajectory** from the server's own audit log — which tool ran,
+against which environment, with which arguments.
+
+```bash
+./.venv/bin/python evals/measure.py                     # payload sizes
+./.venv/bin/python evals/tool_use_evals.py              # 6 cases, spends tokens
+./.venv/bin/python evals/tool_use_evals.py --rescore    # re-score saved replies, free
+```
+
+See [`evals/README.md`](evals/README.md) for what each case catches and
+[`evals/BASELINE.md`](evals/BASELINE.md) for what the last run measured. Tool
+and server descriptions are the highest-leverage thing to change in this
+server, and nothing except an eval tells you they need changing.
+
+### Mutation testing
 
 A suite that passes on its first run proves nothing, so the guarantees above
 were checked by breaking them: reverting refusals to error-shaped returns,
