@@ -106,18 +106,27 @@ def main() -> None:
         description=(
             "Read-only BigQuery MCP server. With no arguments it serves the "
             "Model Context Protocol over stdio, which is how an MCP client "
-            "starts it."
+            "starts it. Run `data-platform-mcp doctor` to check setup."
         ),
     )
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve"],
+        choices=["serve", "doctor"],
         default="serve",
-        help="'serve' (default) runs the server.",
+        help=(
+            "'serve' (default) runs the server; 'doctor' checks that this "
+            "machine can reach BigQuery and reports how to fix what it cannot."
+        ),
     )
-    parser.parse_args()
+    args = parser.parse_args()
+
+    if args.command == "doctor":
+        # Imported lazily: doctor is a one-off, and serve should not pay for it.
+        from .diagnostics import run_doctor
+
+        raise SystemExit(run_doctor())
 
     configure_logging()
     logger.info("starting data-platform-mcp %s", __version__)

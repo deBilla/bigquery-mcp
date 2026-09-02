@@ -23,6 +23,8 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+from .formatting import human_bytes
+
 GIB = 1024**3
 
 # Hard cap on bytes scanned per query. A query estimated above this never runs,
@@ -145,3 +147,24 @@ def describe_settings() -> str:
     if settings.dataset_allowlist:
         parts.append("datasets " + ", ".join(sorted(settings.dataset_allowlist)))
     return "; ".join(parts)
+
+
+def config_summary_lines(settings: Settings | None = None) -> list[str]:
+    """The effective limits, for `doctor` to print.
+
+    Reporting these matters because they are silently overridable by the
+    environment: someone debugging "why did that query get refused" needs to
+    see the caps actually in force, not the documented defaults.
+    """
+    settings = settings or get_settings()
+    lines = [
+        f"warn above:      {human_bytes(settings.warn_bytes)}",
+        f"hard cap:        {human_bytes(settings.max_bytes_billed)}",
+        f"default rows:    {settings.row_limit}",
+        f"price per TiB:   ${settings.cost_per_tib_usd}",
+    ]
+    if settings.dataset_allowlist:
+        lines.append("allowlist:       " + ", ".join(sorted(settings.dataset_allowlist)))
+    else:
+        lines.append("allowlist:       (none — all datasets readable)")
+    return lines

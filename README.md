@@ -80,7 +80,32 @@ gcloud auth application-default login
 > Your account needs **BigQuery Data Viewer** + **BigQuery Job User** on the
 > project you intend to query.
 
-### 3. Register with your AI client
+### 3. Check your setup
+
+```bash
+BQ_PROJECT=your-gcp-project data-platform-mcp doctor
+```
+
+Checks credentials, job permission, dataset visibility and — the one that
+catches people — **dataset regions**. BigQuery cannot query a dataset from a
+different location, and its own error names neither the location it wanted nor
+the one the dataset is in, so it reads as a missing table. `doctor` names both:
+
+```
+[  ok  ] run a query in my-project (location US)
+[  ok  ] 39 datasets visible (no allowlist; all are readable)
+[ warn ] 6 of 39 datasets are outside location US
+         US-CENTRAL1: analytics_raw, business_data, ds_public, pg_public, public, recommendations
+         BigQuery cannot query these from US, and cannot join them with
+         datasets that are in it.
+         Fix:  set BQ_LOCATION to the region you need, and run a separate
+               server for datasets in another one.
+```
+
+A dataset in another region is a warning; one on your `BQ_DATASET_ALLOWLIST` is
+a failure, because no tool call could ever read it.
+
+### 4. Register with your AI client
 
 Replace `your-gcp-project` with your GCP project ID.
 
@@ -115,7 +140,7 @@ claude mcp add bigquery \
 }
 ```
 
-### 4. Restart the client and ask a question
+### 5. Restart the client and ask a question
 
 > "Which datasets are available? In the `sales` dataset, how many rows does the
 > `orders` table have?"
@@ -226,6 +251,7 @@ fakes in `tests/conftest.py`, so it is deterministic and free. Layers:
 | `test_query_guard.py` | The cost gate — what runs, what is refused, what is handed back to the user, and what the caller is told about limits |
 | `test_payload_shape.py` | Response shapes against fake tables, including the partitioning trap and nested-field flattening |
 | `test_observability.py` | The audit trail, and the promise that SQL text never reaches it |
+| `test_diagnostics.py` | `doctor`'s report, including the region and allowlist failures it exists to catch early |
 | `test_config.py` | Settings resolution, and the missing-project error that used to be an import-time crash |
 | `test_errors.py` | Auth failures carry the command that fixes them |
 | `test_formatting.py` | The size and cost figures a user is asked to approve |
