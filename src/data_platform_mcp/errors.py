@@ -37,12 +37,23 @@ def explain_exception(exc: Exception, environment: str = "") -> Exception:
     detail = str(exc)
 
     if isinstance(exc, auth_exceptions.DefaultCredentialsError):
+        # This fires both when a login has expired and when the SDK was never
+        # installed, and the two look identical from here. Naming the second
+        # possibility first saves the user chasing a login command that is not
+        # on their PATH -- the failure that actually happened.
         return DataPlatformMCPError(
-            f"{label}: no Application Default Credentials were found. "
-            "Ask the user to run:\n"
-            "    gcloud auth application-default login\n"
-            "Then retry. If they use a service-account key instead, set "
-            "GOOGLE_APPLICATION_CREDENTIALS to its path."
+            f"{label}: no Application Default Credentials were found. Ask the "
+            "user to check, in order:\n"
+            "  1. Is the SDK installed?  gcloud --version\n"
+            "     If not: https://cloud.google.com/sdk/docs/install\n"
+            "  2. Are they logged in?    gcloud auth application-default login\n"
+            "  3. Is a quota project set?\n"
+            "     gcloud auth application-default set-quota-project PROJECT_ID\n"
+            "If they use a service-account key instead, GOOGLE_APPLICATION_"
+            "CREDENTIALS must be set in the MCP client's config for this "
+            "server, not exported in a shell -- the server is a subprocess and "
+            "sees only what that config declares.\n"
+            "`data-platform-mcp doctor` reports which of these is missing."
         )
 
     if isinstance(exc, auth_exceptions.RefreshError):

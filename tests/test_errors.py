@@ -19,6 +19,28 @@ def test_missing_credentials_names_the_login_command():
     assert "gcloud auth application-default login" in str(out)
 
 
+def test_missing_credentials_covers_the_sdk_not_being_installed():
+    """A machine with no SDK raises the same exception as an expired login.
+
+    Reported from the field: the message sent someone to run a login command
+    that was not on their PATH, on a machine with no SDK at all.
+    """
+    out = str(explain_exception(auth_exceptions.DefaultCredentialsError("boom")))
+    assert "gcloud --version" in out
+    assert "cloud.google.com/sdk/docs/install" in out
+    # ...and the check that would have told them which of the two it was.
+    assert "doctor" in out
+
+
+def test_key_file_guidance_says_where_the_variable_must_be_set():
+    """Exporting it in a shell does nothing: the server is a subprocess that
+    sees only the environment its client config declares. That failure looks
+    identical to having no credentials at all."""
+    out = str(explain_exception(auth_exceptions.DefaultCredentialsError("boom")))
+    assert "GOOGLE_APPLICATION_CREDENTIALS" in out
+    assert "not exported in a shell" in out
+
+
 def test_expired_credentials_names_the_login_command():
     out = explain_exception(auth_exceptions.RefreshError("token expired"))
     assert isinstance(out, DataPlatformMCPError)

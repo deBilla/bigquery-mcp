@@ -64,7 +64,18 @@ def _check_credentials() -> bool:
         )
     except Exception as exc:
         _line(FAIL, "Application Default Credentials")
-        _fix(f"{exc}\nFix:  gcloud auth application-default login")
+        # A machine with no SDK at all produces the same exception as an
+        # expired login, so the fix names both rather than sending someone to
+        # a command that is not on their PATH.
+        _fix(
+            f"{str(exc)[:200]}\n"
+            "Fix:  gcloud --version            # installed at all?\n"
+            "      https://cloud.google.com/sdk/docs/install\n"
+            "      gcloud auth application-default login\n"
+            "Using a key file instead? GOOGLE_APPLICATION_CREDENTIALS must be "
+            "set in the MCP client's config for this server, not exported in a "
+            "shell."
+        )
         return False
     _line(
         OK,

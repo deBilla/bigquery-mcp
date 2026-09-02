@@ -126,15 +126,48 @@ Either way you get a `data-platform-mcp` command, which is what the client runs.
 
 ### 2. Authenticate to Google (one time)
 
-Uses [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials).
-Run this once; queries then execute as you.
+Queries run under **your own** credentials via
+[Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials).
+
+**First check the SDK is actually installed.** The most common setup failure is
+a machine with no `gcloud` at all — the server then reports "no Application
+Default Credentials were found", which reads like an expired login rather than
+a missing toolchain:
+
+```bash
+gcloud --version    # not found? install it, link below
+```
+
+If it is missing, install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
+(macOS: `brew install --cask google-cloud-sdk`), then:
 
 ```bash
 gcloud auth application-default login
+gcloud auth application-default set-quota-project your-gcp-project
 ```
 
-> Your account needs **BigQuery Data Viewer** + **BigQuery Job User** on the
-> project you intend to query.
+The second line matters: some BigQuery APIs bill quota to a project and fail
+without one.
+
+> Your account needs **BigQuery Job User** on the project the query runs in, and
+> **BigQuery Data Viewer** on each dataset it reads — and the dataset is often
+> in a different project from the job. `doctor` checks both.
+
+**Using a service-account key instead?** Set `GOOGLE_APPLICATION_CREDENTIALS`
+to its path — but set it **where the MCP server is launched**, not in a shell:
+
+```jsonc
+// in your client's MCP config, alongside BQ_PROJECT
+"env": {
+  "BQ_PROJECT": "your-gcp-project",
+  "GOOGLE_APPLICATION_CREDENTIALS": "/absolute/path/to/key.json"
+}
+```
+
+The client spawns the server as a subprocess with only the environment its
+config declares. Exporting the variable in a terminal has no effect on it —
+that is a distinct failure from having no credentials at all, and it looks
+identical from the outside.
 
 ### 3. Check your setup
 
