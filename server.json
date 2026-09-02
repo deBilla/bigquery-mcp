@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.deBilla/data-platform-mcp",
+  "title": "BigQuery Data Platform",
+  "description": "Read-only BigQuery tools for asking data questions in plain language, with a cost gate in front of every query",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/deBilla/bigquery-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "data-platform-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BQ_PROJECT",
+          "description": "GCP project whose BigQuery datasets are queried. Falls back to the project associated with Application Default Credentials.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_LOCATION",
+          "description": "BigQuery location for jobs and datasets. Defaults to US.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_DATASET_ALLOWLIST",
+          "description": "Comma-separated dataset IDs the server may read. Empty means all datasets.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_WARN_BYTES",
+          "description": "Scan size above which a query is returned for user confirmation instead of run. Defaults to 1 GiB.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_MAX_BYTES_BILLED",
+          "description": "Hard per-query scan cap; a query estimated above this never runs. Defaults to 5 GiB.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_MCP_AUDIT_LOG",
+          "description": "Path for the JSONL tool-call audit log, or 'off' to disable it. SQL text is never recorded, only a hash and a length.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

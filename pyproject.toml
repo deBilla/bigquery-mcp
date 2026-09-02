@@ -28,9 +28,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/deBilla/data-platform-mcp"
-Repository = "https://github.com/deBilla/data-platform-mcp"
-Issues = "https://github.com/deBilla/data-platform-mcp/issues"
+# The distribution is data-platform-mcp because bigquery-mcp is taken on PyPI
+# by an unrelated project; the repository keeps its original name.
+Homepage = "https://github.com/deBilla/bigquery-mcp"
+Repository = "https://github.com/deBilla/bigquery-mcp"
+Issues = "https://github.com/deBilla/bigquery-mcp/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "anyio>=4.0"]

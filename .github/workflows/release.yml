@@ -1,0 +1,103 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed. Authentication uses PyPI
+# Trusted Publishing (OIDC), so there is no API token stored anywhere -- set
+# the publisher up once at https://pypi.org/manage/account/publishing/ for
+# this repository, workflow file, and the "pypi" environment below.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Three places carry the version and all three are published. A mismatch
+      # ships a tag that points at different code than the package claims, so
+      # it fails here rather than being discovered by whoever installs it.
+      - name: Verify the tag, pyproject and server.json all agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          python - "$tag" <<'PY'
+          import json, sys, tomllib
+          tag = sys.argv[1]
+          pyproject = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          manifest = json.load(open("server.json"))
+          versions = {
+              "tag": tag,
+              "pyproject.toml": pyproject,
+              "server.json": manifest["version"],
+          }
+          for i, package in enumerate(manifest.get("packages", [])):
+              versions[f"server.json packages[{i}]"] = package["version"]
+          if len(set(versions.values())) != 1:
+              for where, value in versions.items():
+                  print(f"  {where}: {value}")
+              sys.exit("::error::version mismatch; see above")
+          print(f"all version references agree at {tag}")
+          PY
+
+      - name: Verify the package name matches what the registry will resolve
+        run: |
+          python - <<'PY'
+          import json, sys, tomllib
+          name = tomllib.load(open("pyproject.toml", "rb"))["project"]["name"]
+          identifier = json.load(open("server.json"))["packages"][0]["identifier"]
+          if name != identifier:
+              sys.exit(f"::error::pyproject name {name!r} != server.json identifier {identifier!r}")
+          print(f"package name is {name} in both")
+          PY
+
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  registry:
+    # Runs after PyPI, because the registry only stores a pointer -- it
+    # resolves the package on PyPI and would 404 on a version not yet there.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # GitHub OIDC, so there is no registry token to store
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher --version
+        env:
+          PUBLISHER_VERSION: 1.8.1
+
+      - name: Publish to the MCP registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

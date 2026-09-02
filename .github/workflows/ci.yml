@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # No GCP credentials exist on this runner. The suite is expected to pass
+      # anyway -- if a test ever needs them, it is talking to BigQuery, and
+      # that is the thing this suite is designed not to do.
+      - name: Test
+        run: python -m pytest
+
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # This repository is public and ships a package to PyPI, so a credential
+      # committed by accident is published twice over. Pattern-based only, so
+      # this check names nothing that is itself sensitive.
+      - name: Scan tracked files for credential-shaped strings
+        run: |
+          patterns='pypi-AgEIcHlwaS5vcmc|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY|"private_key_id"|ya29\.[0-9A-Za-z_-]{20,}|xox[baprs]-[0-9A-Za-z-]{10,}'
+          # This file necessarily contains the patterns it searches for, so it
+          # is excluded; otherwise the check fails on itself, every run.
+          if git ls-files -z ':!:.github/workflows/ci.yml' \
+               | xargs -0 grep -lEI "$patterns" 2>/dev/null; then
+            echo "::error::credential-shaped string found in a tracked file"
+            exit 1
+          fi
+          echo "no credential patterns found"
+
+      - name: Assert local config files are not tracked
+        run: |
+          for f in .env .mcp.json; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error::$f is tracked and must not be"
+              exit 1
+            fi
+          done
+          echo "local config files are untracked"
+
+      # The read-only guarantee is enforced at run time by rejecting any
+      # statement type but SELECT. This is the static half: the BigQuery client
+      # can also mutate through plain method calls that never touch SQL, and
+      # nothing in this server has a reason to call one.
+      - name: Assert no mutating BigQuery calls exist in the source
+        run: |
+          mutators='\.(insert_rows|insert_rows_json|load_table_from_[a-z]+|create_table|create_dataset|delete_table|delete_dataset|update_table|update_dataset|copy_table|extract_table|set_iam_policy)\('
+          if grep -rEn "$mutators" src/; then
+            echo "::error::a mutating BigQuery client call appears in src/"
+            exit 1
+          fi
+          echo "no mutating BigQuery calls in src/"
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build
+
+      - name: Check metadata renders on PyPI
+        run: twine check dist/*
+
+      # A published sdist is public. Fail the build rather than ship a file
+      # that was only ever meant to exist on a developer's machine.
+      - name: Assert no local config in the sdist
+        run: |
+          if tar tzf dist/*.tar.gz | grep -E '(^|/)(\.env|\.mcp\.json)$'; then
+            echo "::error::local configuration found in the sdist"
+            exit 1
+          fi
+          echo "sdist is clean"
+
+      - name: Assert the server starts from a clean install
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          BQ_PROJECT=ci-demo BQ_MCP_AUDIT_LOG=off /tmp/smoke/bin/python - <<'PY'
+          import json, subprocess, sys
+
+          p = subprocess.Popen(["/tmp/smoke/bin/data-platform-mcp"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               text=True, bufsize=1)
+          def send(m): p.stdin.write(json.dumps(m) + "\n"); p.stdin.flush()
+
+          send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+              "protocolVersion": "2024-11-05", "capabilities": {},
+              "clientInfo": {"name": "ci", "version": "0"}}})
+          init = json.loads(p.stdout.readline())["result"]
+          print("server:", init["serverInfo"])
+
+          send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+          send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+          tools = json.loads(p.stdout.readline())["result"]["tools"]
+          p.terminate()
+
+          names = sorted(t["name"] for t in tools)
+          print("tools:", names)
+
+          problems = []
+          # Guards the exact failure an unpinned mcp dependency caused before:
+          # a package that installs cleanly and dies on the first request.
+          if len(tools) != 5:
+              problems.append(f"expected 5 tools, got {len(tools)}")
+          # A tool that loses its annotations stops declaring itself read-only
+          # to the client, which is how this server describes what it is.
+          for t in tools:
+              a = t.get("annotations") or {}
+              if a.get("readOnlyHint") is not True or a.get("destructiveHint") is not False:
+                  problems.append(f"{t['name']} is not annotated read-only")
+              if not t.get("description"):
+                  problems.append(f"{t['name']} has no description")
+          # The instructions are load-bearing behaviour, not documentation:
+          # without them an agent will confirm its own expensive queries.
+          if "NEVER SELF-CONFIRM" not in (init.get("instructions") or ""):
+              problems.append("server instructions are missing or truncated")
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

@@ -1,5 +1,7 @@
 # BigQuery MCP
 
+[![CI](https://github.com/deBilla/bigquery-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/deBilla/bigquery-mcp/actions/workflows/ci.yml)
+
 A **read-only** [Model Context Protocol](https://modelcontextprotocol.io) server over
 Google BigQuery. It lets an AI client (Claude Code, Claude Desktop, …) answer
 plain-language data questions by discovering schema and running `SELECT` queries.
@@ -41,7 +43,20 @@ Each person runs their own local copy. Queries execute under **their own**
 BigQuery/IAM permissions, so existing access controls decide who can see what.
 You need Python 3.11+ and the `gcloud` CLI installed.
 
-### 1. Clone and install
+### 1. Install
+
+The package is published as **`data-platform-mcp`** (`bigquery-mcp` was already
+taken on PyPI by an unrelated project). Once a release is tagged, no checkout is
+needed — the client can fetch and run it directly:
+
+```bash
+uvx data-platform-mcp --version
+```
+
+> **Not yet published.** No version tag has been pushed, so use the source
+> install below until one is. See [Releasing](#releasing).
+
+**From source:**
 
 ```bash
 git clone git@github.com:deBilla/bigquery-mcp.git
@@ -51,8 +66,7 @@ python3 -m venv .venv
 ./.venv/bin/pip install -e .
 ```
 
-This installs a `data-platform-mcp` command inside `.venv/bin`, which is what
-the client will run.
+Either way you get a `data-platform-mcp` command, which is what the client runs.
 
 ### 2. Authenticate to Google (one time)
 
@@ -68,10 +82,18 @@ gcloud auth application-default login
 
 ### 3. Register with your AI client
 
-Replace `/abs/path/bigquery-mcp` with the absolute path to your checkout, and
-`your-gcp-project` with your GCP project ID.
+Replace `your-gcp-project` with your GCP project ID.
 
-**Claude Code**
+**Claude Code** — once published:
+
+```bash
+claude mcp add bigquery \
+  --env BQ_PROJECT=your-gcp-project \
+  -- uvx data-platform-mcp
+```
+
+From a source install, point at the checkout instead (replace
+`/abs/path/bigquery-mcp`):
 
 ```bash
 claude mcp add bigquery \
@@ -214,6 +236,45 @@ logging raw SQL, guessing partitioning from column names, removing the response
 budget, dropping `functools.wraps` from the audit wrapper, letting confirmation
 bypass the hard cap, silencing stale-table detection, and removing the
 allowlist check. Each one fails the suite.
+
+## Releasing
+
+Version numbers live in two files and CI refuses a tag where they disagree — a
+mismatch would ship a tag pointing at different code than the package claims.
+(`__version__` is read from the installed distribution, so it cannot drift.)
+
+```bash
+# 1. bump both to the same value
+#      pyproject.toml   project.version
+#      server.json      version  AND  packages[0].version
+
+# 2. tag and push
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The tag triggers `.github/workflows/release.yml`, which verifies the versions
+agree, builds, publishes to PyPI via **Trusted Publishing**, then registers the
+release with the **MCP registry**. Neither step stores a token: PyPI uses OIDC
+from this repository and the `pypi` environment, and the registry uses GitHub
+OIDC. Both need one-time setup before the first release:
+
+- **PyPI:** add a trusted publisher at
+  <https://pypi.org/manage/account/publishing/> for repository
+  `deBilla/bigquery-mcp`, workflow `release.yml`, environment `pypi`.
+- **GitHub:** create the `pypi` environment in repository settings.
+
+### What CI checks
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+| Job | Checks |
+|-----|--------|
+| `test` | The suite on Python 3.11, 3.12 and 3.13 — with no GCP credentials on the runner, which is the point |
+| `safety` | No credential-shaped strings in tracked files; `.env`/`.mcp.json` untracked; **no mutating BigQuery client calls anywhere in `src/`** |
+| `package` | Builds, `twine check`s, asserts no local config leaked into the sdist, then installs the wheel into a clean venv and drives the real protocol — 5 tools, every one annotated read-only and documented, instructions intact |
+
+The last one is the important one: it catches a package that installs cleanly
+and dies on its first request, which is a failure no unit test sees.
 
 ## License
 
