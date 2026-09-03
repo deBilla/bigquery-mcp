@@ -72,7 +72,15 @@ jobs:
             echo "::error::a mutating BigQuery client call appears in src/"
             exit 1
           fi
-          echo "no mutating BigQuery calls in src/"
+          # The Data Transfer Service can create, delete and trigger scheduled
+          # queries. Those tools are simply not registered, and this keeps it
+          # that way.
+          transfers='\.(create_transfer_config|update_transfer_config|delete_transfer_config|start_manual_transfer_runs|schedule_transfer_runs)\('
+          if grep -rEn "$transfers" src/; then
+            echo "::error::a mutating Data Transfer call appears in src/"
+            exit 1
+          fi
+          echo "no mutating BigQuery or Data Transfer calls in src/"
 
   package:
     runs-on: ubuntu-latest
@@ -130,8 +138,8 @@ jobs:
           problems = []
           # Guards the exact failure an unpinned mcp dependency caused before:
           # a package that installs cleanly and dies on the first request.
-          if len(tools) != 6:
-              problems.append(f"expected 6 tools, got {len(tools)}")
+          if len(tools) != 8:
+              problems.append(f"expected 8 tools, got {len(tools)}")
           # A tool that loses its annotations stops declaring itself read-only
           # to the client, which is how this server describes what it is.
           for t in tools:

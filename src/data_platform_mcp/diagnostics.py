@@ -268,6 +268,36 @@ def _check_locations(env: Environment, names: list[str]) -> bool:
     return not blocked
 
 
+def _check_scheduled_queries(env: Environment) -> bool:
+    """Scheduled queries need a role the querying tools do not.
+
+    Never fatal: the server is fully usable without it, and reporting a missing
+    optional permission as a failure would train people to ignore FAIL lines.
+    """
+    try:
+        from .tools.transfer_tools import _client, _parent
+
+        client = _client(env)
+        configs = list(client.list_transfer_configs(parent=_parent(env)))
+    except Exception as exc:
+        _line(SKIP, "scheduled queries unavailable")
+        _fix(
+            f"{str(exc)[:160]}\n"
+            "Optional. To enable list_scheduled_queries / get_scheduled_query:\n"
+            f"      gcloud projects add-iam-policy-binding {env.project} \\\n"
+            "        --member=MEMBER --role=roles/bigquerydatatransfer.viewer"
+        )
+        return True
+    queries = [c for c in configs if c.data_source_id == "scheduled_query"]
+    disabled = sum(1 for c in queries if c.disabled)
+    _line(
+        OK,
+        f"{len(queries)} scheduled queries readable"
+        + (f" ({disabled} disabled)" if disabled else ""),
+    )
+    return True
+
+
 def _check_audit_log() -> bool:
     """The audit trail is the only record of what was asked; say if it is off."""
     from .observability import _audit_path
@@ -320,6 +350,7 @@ def run_doctor() -> int:
             datasets_ok, names = _check_datasets(env)
             results.append(datasets_ok)
             results.append(_check_locations(env, names))
+            results.append(_check_scheduled_queries(env))
             healthy = all(results) and healthy
         else:
             _line(SKIP, "BigQuery checks (no usable credentials)")

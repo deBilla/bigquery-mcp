@@ -157,3 +157,62 @@ def fake_client(monkeypatch):
         monkeypatch.setattr(module, "get_bigquery_client", lambda _settings: holder)
     holder.install = install
     return holder
+
+
+# --- fakes for the Data Transfer Service (scheduled queries) ----------------
+
+
+class FakeTransferConfig:
+    def __init__(self, display_name, query="", schedule="every day 01:00",
+                 destination_dataset_id="", table="", state=4, disabled=False,
+                 config_id="abc-123", data_source_id="scheduled_query",
+                 next_run_time=None, write_disposition="WRITE_TRUNCATE"):
+        self.display_name = display_name
+        self.name = f"projects/1/locations/us/transferConfigs/{config_id}"
+        self.schedule = schedule
+        self.destination_dataset_id = destination_dataset_id
+        self.state = state
+        self.disabled = disabled
+        self.data_source_id = data_source_id
+        self.next_run_time = next_run_time
+        self.params = {
+            "query": query,
+            "destination_table_name_template": table,
+            "write_disposition": write_disposition,
+        }
+
+
+class FakeRun:
+    def __init__(self, state=4, error="", run_time=None):
+        self.state = state
+        self.run_time = run_time
+        self.error_status = type("S", (), {"message": error})()
+
+
+class FakeTransferClient:
+    """Stands in for DataTransferServiceClient."""
+
+    def __init__(self, configs=(), runs=(), raise_on_list=None):
+        self.configs = list(configs)
+        self.runs = list(runs)
+        self.raise_on_list = raise_on_list
+        self.parents = []
+
+    def list_transfer_configs(self, parent=None):
+        self.parents.append(parent)
+        if self.raise_on_list:
+            raise self.raise_on_list
+        return iter(self.configs)
+
+    def list_transfer_runs(self, request=None):
+        return iter(self.runs)
+
+
+@pytest.fixture
+def fake_transfers(monkeypatch):
+    """Install a fake Data Transfer client; the test fills it in."""
+    from data_platform_mcp.tools import transfer_tools
+
+    holder = FakeTransferClient()
+    monkeypatch.setattr(transfer_tools, "_client", lambda _env: holder)
+    return holder

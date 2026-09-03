@@ -219,6 +219,13 @@ google-cloud-bigquery Python client, which has no such cap.</pre>
       <code>__TABLES__</code> — zero bytes scanned — and names anything untouched for
       over 30 days.</p>
     </div>
+    <div class="card">
+      <h4>…and something disabled them</h4>
+      <p>A stale table is usually a scheduled query that was switched off or is failing.
+      <code>list_scheduled_queries</code> says which one writes a table and what state it
+      is in. Most declare no destination because they write with DDL, so the target is
+      read out of the SQL.</p>
+    </div>
   </div>
 
   <p>
@@ -229,7 +236,7 @@ google-cloud-bigquery Python client, which has no such cap.</pre>
 </div></section>
 
 <section id="tools"><div class="inner">
-  <p class="eyebrow">Six tools</p>
+  <p class="eyebrow">Eight tools</p>
   <h2>Discovery is free. Only one tool costs anything.</h2>
   <div class="scroll"><table>
     <thead><tr><th>Tool</th><th>Purpose</th><th>Cost</th></tr></thead>
@@ -239,6 +246,8 @@ google-cloud-bigquery Python client, which has no such cap.</pre>
       <tr><td><code>list_tables</code></td><td>Tables and views in a dataset</td><td>free</td></tr>
       <tr><td><code>get_table_schema</code></td><td>Columns as dotted paths, <strong>partitioning</strong>, size, freshness</td><td>free</td></tr>
       <tr><td><code>check_table_freshness</code></td><td>When each table was last written</td><td>free</td></tr>
+      <tr><td><code>list_scheduled_queries</code></td><td>What writes a table, and whether it is disabled or failing</td><td>free</td></tr>
+      <tr><td><code>get_scheduled_query</code></td><td>One query's SQL, destination and recent runs</td><td>free</td></tr>
       <tr><td><code>run_query</code></td><td>A validated, read-only <code>SELECT</code></td><td>scans data</td></tr>
     </tbody>
   </table></div>

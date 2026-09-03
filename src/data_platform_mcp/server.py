@@ -27,7 +27,12 @@ from mcp.server.fastmcp import FastMCP
 from . import __version__
 from .config import describe_environments
 from .observability import configure_logging, logger
-from .tools import discovery_tools, environment_tools, query_tools
+from .tools import (
+    discovery_tools,
+    environment_tools,
+    query_tools,
+    transfer_tools,
+)
 
 
 def _instructions() -> str:
@@ -44,6 +49,11 @@ def _instructions() -> str:
         "can be hundreds of gigabytes. Two tables in the same dataset with the "
         "same columns often differ here. Columns come back as dotted paths; a "
         "column marked `repeated` needs UNNEST.\n\n"
+        "WHEN A TABLE IS STALE, FIND WHAT WRITES IT. "
+        "list_scheduled_queries shows which scheduled query populates a table "
+        "and whether it is disabled or failing — usually the actual answer to "
+        "\"why has this not updated\", and cheaper than reasoning about the "
+        "data. get_scheduled_query returns one query's SQL and recent runs.\n\n"
         "CHECK FRESHNESS BEFORE TRUSTING A TABLE you have not used before. "
         "Some tables on this platform stopped being written to without being "
         "dropped, so they return stale data rather than an error. If "
@@ -76,7 +86,7 @@ def _instructions() -> str:
 
 mcp = FastMCP("data-platform", instructions=_instructions())
 
-for module in (environment_tools, discovery_tools, query_tools):
+for module in (environment_tools, discovery_tools, transfer_tools, query_tools):
     module.register(mcp)
 
 

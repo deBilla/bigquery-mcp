@@ -25,6 +25,8 @@ executes against BigQuery under **your own** Google credentials.
 | `get_table_schema` | Columns (nested paths expanded), **partitioning**, size, row count | free |
 | `check_table_freshness` | When each table was last written — catches stale sources | free |
 | `list_environments` | Which BigQuery environments are configured, and the default | free |
+| `list_scheduled_queries` | Which scheduled query writes a table, and whether it is disabled or failing | free |
+| `get_scheduled_query` | One query's SQL, destination and recent runs | free |
 | `run_query` | Run a validated, read-only `SELECT` and return rows | scans data |
 
 Only `run_query` costs anything, so the discovery tools are the ones to spend
@@ -37,6 +39,13 @@ first. Two of them exist to prevent specific, repeated mistakes:
 - **`check_table_freshness` finds tables that stopped being written to** without
   being dropped. Those return stale data rather than an error, which is the
   failure mode nobody notices.
+- **`list_scheduled_queries` says why.** A stale table is usually a scheduled
+  query that was disabled or is failing, and that lives in a different API
+  (BigQuery Data Transfer) needing `roles/bigquerydatatransfer.viewer`. Without
+  that role the two tools return an error naming it and everything else works
+  normally. Most scheduled queries declare no destination because they write
+  with DDL, so the target is read out of the SQL and reported as
+  `writes_to_from_sql` — a heuristic, labelled as one.
 
 ---
 

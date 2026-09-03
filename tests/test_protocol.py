@@ -25,6 +25,8 @@ EXPECTED_TOOLS = {
     "get_table_schema",
     "check_table_freshness",
     "run_query",
+    "list_scheduled_queries",
+    "get_scheduled_query",
 }
 
 

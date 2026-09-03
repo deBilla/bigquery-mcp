@@ -24,6 +24,8 @@ classifiers = [
 dependencies = [
     "mcp>=1.2.0,<2",
     "google-cloud-bigquery>=3.25.0",
+    # Scheduled queries live in the Data Transfer Service, a separate API.
+    "google-cloud-bigquery-datatransfer>=3.15.0",
     "google-auth>=2.28.0",
 ]
 

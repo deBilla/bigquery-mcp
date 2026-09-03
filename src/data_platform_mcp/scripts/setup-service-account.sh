@@ -145,6 +145,16 @@ else
     --quiet >/dev/null
 fi
 
+# 3b. Scheduled queries are a different API with a different permission, so
+#     the querying roles above do not cover them. Optional: without it the two
+#     scheduled-query tools report a clear error and everything else works.
+echo "[ .. ] granting roles/bigquerydatatransfer.viewer on $PROJECT (scheduled queries)"
+run gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member "serviceAccount:${SA_EMAIL}" \
+  --role roles/bigquerydatatransfer.viewer \
+  --condition None \
+  --quiet >/dev/null
+
 # 4. Let the human impersonate it. Without this the server cannot mint a token
 #    and fails at the first query with a 403 naming neither account nor role.
 echo "[ .. ] granting roles/iam.serviceAccountTokenCreator on the account to $MEMBER"
