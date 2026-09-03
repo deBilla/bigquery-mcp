@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>data-platform-mcp — read-only BigQuery for AI agents</title>
+<meta name="description" content="A read-only Model Context Protocol server that lets an AI agent answer plain-language data questions against BigQuery — with a cost gate in front of every query.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --ink:        #101822;
+  --ink-2:      #33414f;
+  --ink-3:      #5d6b7a;
+  --ground:     #f7f8f7;
+  --surface:    #ffffff;
+  --surface-2:  #eef1f0;
+  --rule:       #d9dedd;
+  --accent:     #33568f;
+  --accent-ink: #24406c;
+  --accent-wash:#dee7f3;
+  --good:       #1c6b3f;
+  --warn:       #8a5a10;
+  --bad:        #9c2f2a;
+  --code-bg:    #101822;
+  --code-fg:    #e3e9e7;
+  --code-dim:   #8fa0a0;
+  --shadow:     0 1px 2px rgba(16,24,34,.06), 0 8px 24px -16px rgba(16,24,34,.22);
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink:#e6ecea; --ink-2:#b3bfbd; --ink-3:#8493a0;
+    --ground:#0c1116; --surface:#131a21; --surface-2:#1a232b; --rule:#26313a;
+    --accent:#7ea6e0; --accent-ink:#a8c6ee; --accent-wash:#16283f;
+    --good:#62c48c; --warn:#d8a441; --bad:#e2726a;
+    --code-bg:#080c10; --code-fg:#dfe7e4; --code-dim:#6d7f7f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.6);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:16.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.inner { max-width:920px; margin:0 auto; padding:0 24px; }
+a { color:var(--accent-ink); text-decoration-thickness:1px; text-underline-offset:2px; }
+a:hover { color:var(--accent); }
+code, .mono { font-family:var(--mono); font-size:.9em; }
+p code, li code, td code {
+  background:var(--surface-2); border:1px solid var(--rule);
+  border-radius:4px; padding:.08em .34em;
+}
+h1,h2,h3 { line-height:1.25; letter-spacing:-.012em; }
+h2 { font-size:1.5rem; margin:0 0 .2rem; }
+h3 { font-size:1.06rem; margin:1.9rem 0 .35rem; }
+.eyebrow {
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--accent); margin:0 0 .5rem;
+}
+
+/* masthead + hero */
+.masthead { border-bottom:1px solid var(--rule); background:var(--surface); }
+.masthead .inner { display:flex; align-items:center; gap:16px; height:58px; }
+.wordmark { font-family:var(--mono); font-weight:600; letter-spacing:-.02em; }
+.wordmark .dot { color:var(--accent); }
+.masthead nav { margin-left:auto; display:flex; gap:18px; font-size:.86rem; }
+.masthead nav a { color:var(--ink-2); text-decoration:none; }
+.masthead nav a:hover { color:var(--accent); }
+.hero { padding:64px 0 44px; border-bottom:1px solid var(--rule); background:var(--surface); }
+.hero h1 { font-size:2.5rem; margin:0 0 .5rem; }
+.lede { font-size:1.16rem; color:var(--ink-2); max-width:64ch; margin:0 0 1.5rem; }
+.badges { display:flex; flex-wrap:wrap; gap:8px; }
+.badge {
+  font-family:var(--mono); font-size:.74rem; padding:.24em .6em; border-radius:999px;
+  border:1px solid var(--rule); background:var(--surface-2); color:var(--ink-2);
+}
+.badge.ro { background:var(--accent-wash); border-color:transparent; color:var(--accent-ink); font-weight:600; }
+
+section { padding:52px 0; border-bottom:1px solid var(--rule); }
+section > .inner > p { max-width:70ch; color:var(--ink-2); }
+.sub { color:var(--ink-3); font-size:.95rem; }
+
+pre {
+  background:var(--code-bg); color:var(--code-fg); border-radius:8px;
+  padding:16px 18px; overflow-x:auto; font-family:var(--mono);
+  font-size:.855rem; line-height:1.6; box-shadow:var(--shadow);
+}
+pre .c { color:var(--code-dim); }
+pre .key { color:#8fc7ea; }
+pre b { color:#ffd479; font-weight:600; }
+
+table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.93rem; }
+th, td { text-align:left; padding:.6rem .7rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+th { font-size:.75rem; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:600; }
+.scroll { overflow-x:auto; }
+
+.note, .warn {
+  border-left:3px solid var(--accent); background:var(--surface);
+  padding:.9rem 1.1rem; border-radius:0 6px 6px 0; margin:1.2rem 0;
+  box-shadow:var(--shadow); font-size:.95rem;
+}
+.warn { border-left-color:var(--warn); }
+.note p, .warn p { margin:.35rem 0; color:var(--ink-2); }
+.note p:first-child, .warn p:first-child { margin-top:0; }
+.note p:last-child, .warn p:last-child { margin-bottom:0; }
+
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px; margin:1.2rem 0; }
+.card { background:var(--surface); border:1px solid var(--rule); border-radius:8px; padding:16px 18px; box-shadow:var(--shadow); }
+.card h4 { margin:.1rem 0 .35rem; font-size:.98rem; }
+.card p { margin:0; font-size:.9rem; color:var(--ink-2); }
+
+.gate { display:grid; gap:10px; margin:1.2rem 0; }
+.gate .step { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+  background:var(--surface); border:1px solid var(--rule); border-radius:8px; padding:14px 16px; }
+.gate .n { font-family:var(--mono); font-weight:600; color:var(--accent); }
+.gate .step p { margin:.15rem 0 0; font-size:.92rem; color:var(--ink-2); }
+.gate .step strong { color:var(--ink); }
+
+footer { padding:38px 0 60px; color:var(--ink-3); font-size:.88rem; }
+footer a { color:var(--ink-2); }
+@media (max-width:620px){ .hero h1{font-size:2rem;} body{font-size:16px;} }
+</style>
+</head>
+<body>
+
+<div class="masthead"><div class="inner">
+  <span class="wordmark">data-platform-mcp<span class="dot">.</span></span>
+  <nav>
+    <a href="#cost">Cost gate</a>
+    <a href="#tools">Tools</a>
+    <a href="#start">Quickstart</a>
+    <a href="https://github.com/deBilla/bigquery-mcp">GitHub</a>
+  </nav>
+</div></div>
+
+<section class="hero"><div class="inner">
+  <p class="eyebrow">Model Context Protocol server</p>
+  <h1>Ask your warehouse a question.<br>Not your wallet.</h1>
+  <p class="lede">
+    A <strong>read-only</strong> BigQuery server for AI agents. It turns plain-language
+    questions into SQL, and puts a cost gate in front of every query — so a careless
+    <code>SELECT *</code> is priced and refused instead of billed.
+  </p>
+  <div class="badges">
+    <span class="badge ro">read-only</span>
+    <span class="badge">pip install data-platform-mcp</span>
+    <span class="badge">Python 3.11+</span>
+    <span class="badge">MIT</span>
+  </div>
+</div></section>
+
+<section id="cost"><div class="inner">
+  <p class="eyebrow">The point of it</p>
+  <h2>Three defences, because they fail differently</h2>
+  <p>
+    An agent writing SQL against a warehouse is an agent spending money it cannot see.
+    Every query here is priced before it runs, and the expensive decision is handed back
+    to the person who pays for it.
+  </p>
+
+  <div class="gate">
+    <div class="step"><span class="n">1</span><div>
+      <strong>Dry run, always.</strong>
+      <p>Validates the SQL and prices it before a byte is scanned. It also reports the
+      statement type — which is how anything that is not a <code>SELECT</code> is refused
+      reliably, rather than by pattern-matching the text.</p>
+    </div></div>
+    <div class="step"><span class="n">2</span><div>
+      <strong>A costly query stops and asks.</strong>
+      <p>Above the warning threshold the query does <em>not</em> run. The agent gets back
+      <code>status: "confirmation_required"</code> with the size and the dollar figure, and
+      is told to report it and wait. <code>confirm_expensive</code> records the user's
+      decision, not the agent's.</p>
+    </div></div>
+    <div class="step"><span class="n">3</span><div>
+      <strong>A hard cap nothing can bypass.</strong>
+      <p>Above it, the query never runs — confirmed or not — and
+      <code>maximum_bytes_billed</code> is set on the job as a second line of defence in
+      case the estimate was low.</p>
+    </div></div>
+  </div>
+
+<pre><span class="c"># a real refusal, against a 6.7 TiB unpartitioned table</span>
+This query would scan <b>5.09 TiB ($31.79)</b>, above this server's
+5.00 GiB hard limit, so it did not run. Select fewer columns, or
+filter on a partition column if get_table_schema shows the table
+has one.
+Note that this cap is a guardrail on <b>this tool, not a BigQuery
+limit</b> — a genuinely large query can be run directly with the
+google-cloud-bigquery Python client, which has no such cap.</pre>
+
+  <div class="note"><p>
+    Refusals arrive as protocol errors, so a client can tell them from results.
+    <code>confirmation_required</code> is the deliberate exception: it is a normal
+    result, because the agent is meant to relay it and come back.
+  </p></div>
+</div></section>
+
+<section id="knows"><div class="inner">
+  <p class="eyebrow">Beyond the schema</p>
+  <h2>Two things a column list will not tell you</h2>
+
+  <div class="cards">
+    <div class="card">
+      <h4>A date-shaped column is not a partition</h4>
+      <p>Partitioning is read from table metadata, never inferred from a name. Two tables
+      in one dataset can share 218 identical columns and have opposite cost behaviour —
+      one partitioned on <code>partition_date</code>, its twin not partitioned at all.
+      Guessing turns a filtered query into a multi-terabyte scan.</p>
+    </div>
+    <div class="card">
+      <h4>Dead tables still answer queries</h4>
+      <p>A table that stopped being written to returns stale rows rather than an error,
+      which is the failure nobody notices. <code>check_table_freshness</code> reads
+      <code>__TABLES__</code> — zero bytes scanned — and names anything untouched for
+      over 30 days.</p>
+    </div>
+  </div>
+
+  <p>
+    Nested records are expanded to dotted paths and flagged <code>repeated</code>, so
+    <code>UNNEST</code> can be written rather than guessed: a GA4-shaped table reports
+    32 top-level columns and 218 fields.
+  </p>
+</div></section>
+
+<section id="tools"><div class="inner">
+  <p class="eyebrow">Six tools</p>
+  <h2>Discovery is free. Only one tool costs anything.</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Tool</th><th>Purpose</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td><code>list_environments</code></td><td>Which warehouses are configured, and the default</td><td>free</td></tr>
+      <tr><td><code>list_datasets</code></td><td>Datasets in the project</td><td>free</td></tr>
+      <tr><td><code>list_tables</code></td><td>Tables and views in a dataset</td><td>free</td></tr>
+      <tr><td><code>get_table_schema</code></td><td>Columns as dotted paths, <strong>partitioning</strong>, size, freshness</td><td>free</td></tr>
+      <tr><td><code>check_table_freshness</code></td><td>When each table was last written</td><td>free</td></tr>
+      <tr><td><code>run_query</code></td><td>A validated, read-only <code>SELECT</code></td><td>scans data</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub">
+    Responses are size-bounded as a whole, not by row count: 500 wide rows come back as
+    the 19 that fit, flagged <code>stopped_for_size</code>, rather than a megabyte of JSON
+    in the context window. A partial answer always says it is partial.
+  </p>
+</div></section>
+
+<section id="identity"><div class="inner">
+  <p class="eyebrow">Security</p>
+  <h2>Read-only as a property of the identity</h2>
+  <p>
+    The <code>SELECT</code>-only guard and the <code>readOnlyHint</code> annotations are
+    promises about code. Pointing the server at a service account holding only
+    <code>roles/bigquery.jobUser</code> and a dataset-scoped
+    <code>roles/bigquery.dataViewer</code> makes it a fact about the credentials —
+    enforced by IAM whatever the code does, and whatever your own roles allow.
+  </p>
+<pre><span class="c"># creates the account, grants exactly those two roles,</span>
+<span class="c"># and lets you impersonate it — no key file to manage</span>
+data-platform-mcp setup --project my-warehouse --datasets sales,events</pre>
+  <p>
+    With <code>--datasets</code>, the dataset allowlist stops being an <code>if</code>
+    statement in this process and becomes a grant Google enforces.
+  </p>
+  <div class="note"><p>
+    Query text is <strong>never</strong> written to the audit log — only a hash and a
+    length. A <code>WHERE</code> clause routinely carries the user ids and emails it
+    filters on, and an audit file that copies them is a second uncontrolled home for
+    that data.
+  </p></div>
+</div></section>
+
+<section id="environments"><div class="inner">
+  <p class="eyebrow">Environments</p>
+  <h2>One server, several warehouses</h2>
+  <p>
+    Every tool takes an optional <code>environment</code>. An unknown name is an error
+    naming the valid options, never a silent fall back — a typo that answered a
+    production question from staging would be invisible in the reply. Every result
+    echoes back where it came from.
+  </p>
+<pre><span class="c"># ~/.config/data-platform-mcp/config.toml</span>
+<span class="key">default_environment</span> = "warehouse"
+
+<span class="key">[environments.warehouse]</span>
+project     = "my-warehouse"
+impersonate = "data-platform-mcp-ro@my-warehouse.iam.gserviceaccount.com"
+dataset_allowlist = ["sales", "events"]
+
+<span class="key">[environments.central]</span>   <span class="c"># same project, different region</span>
+project  = "my-warehouse"
+location = "us-central1"</pre>
+  <div class="warn"><p>
+    <strong>Regions are why this matters.</strong> BigQuery cannot query across
+    locations, and its error for trying names neither location — so it reads as a missing
+    table. One environment per location; <code>doctor</code> reports which datasets are
+    where.
+  </p></div>
+</div></section>
+
+<section id="start"><div class="inner">
+  <p class="eyebrow">Quickstart</p>
+  <h2>Two pastes, once</h2>
+
+  <h3>Install and authenticate</h3>
+<pre><span class="c"># macOS / Linux — no Xcode Command Line Tools needed</span>
+curl -LsSf https://astral.sh/uv/install.sh | sh
+gcloud auth application-default login
+
+<span class="c"># confirm credentials, roles, datasets and regions in one pass</span>
+BQ_PROJECT=my-warehouse uvx data-platform-mcp doctor</pre>
+
+  <h3>Claude Code</h3>
+<pre>claude mcp add bigquery --env BQ_PROJECT=my-warehouse \
+  -- uvx data-platform-mcp</pre>
+
+  <h3>Claude Desktop</h3>
+  <p class="sub">
+    Desktop launches from the Finder and inherits no shell <code>PATH</code>, so the
+    command must be an absolute path — <code>which uvx</code> prints it. Credentials are
+    unaffected: they are a file the Google libraries read directly.
+  </p>
+<pre>{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"bigquery"</span>: {
+      <span class="key">"command"</span>: "/Users/you/.local/bin/uvx",
+      <span class="key">"args"</span>: ["data-platform-mcp"],
+      <span class="key">"env"</span>: { <span class="key">"BQ_PROJECT"</span>: "my-warehouse" }
+    }
+  }
+}</pre>
+  <p class="sub">
+    Full per-platform instructions, including Windows and a no-terminal path for
+    analysts, are in the
+    <a href="https://github.com/deBilla/bigquery-mcp#readme">README</a>.
+  </p>
+</div></section>
+
+<section id="quality"><div class="inner">
+  <p class="eyebrow">How it is checked</p>
+  <h2>Tests, and evals for the things tests cannot see</h2>
+  <p>
+    The suite runs with no credentials and no network — every test uses fakes, so it is
+    deterministic and free. Above it sit two layers that need a live warehouse:
+    <code>measure.py</code> records what a client actually receives from each tool, and a
+    set of tool-use evals asks real questions through the Claude CLI and scores the
+    <em>trajectory</em> from the server's own audit log — which tool ran, against which
+    environment, with which arguments.
+  </p>
+  <div class="note"><p>
+    <strong>A suite that passes on its first run proves nothing.</strong> Each guarantee
+    here was checked by deliberately breaking it, and each eval case is fed the
+    trajectory it exists to reject — the wrong warehouse, a query before a schema read, a
+    self-approved spend, a fluent answer with no tool call at all.
+  </p></div>
+</div></section>
+
+<footer><div class="inner">
+  <p>
+    MIT licensed ·
+    <a href="https://github.com/deBilla/bigquery-mcp">Source</a> ·
+    <a href="https://pypi.org/project/data-platform-mcp/">PyPI</a> ·
+    <a href="https://github.com/deBilla/bigquery-mcp/issues">Issues</a>
+  </p>
+  <p class="sub">
+    Not affiliated with Google. BigQuery is a trademark of Google LLC.
+  </p>
+</div></footer>
+
+</body>
+</html>

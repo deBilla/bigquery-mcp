@@ -103,6 +103,19 @@ def test_the_readme_proves_ownership_of_the_pypi_package(manifest):
     )
 
 
+def test_the_documented_site_is_actually_in_the_repository(manifest):
+    """websiteUrl is published to the registry, so a missing page is a dead
+    link on someone else's listing rather than a local mistake."""
+    if "websiteUrl" not in manifest:
+        pytest.skip("no website declared")
+    page = ROOT / "docs" / "index.html"
+    assert page.exists(), "server.json declares a websiteUrl but docs/ has no page"
+    # GitHub Pages runs Jekyll unless told not to, which silently drops files
+    # and directories beginning with an underscore.
+    assert (ROOT / "docs" / ".nojekyll").exists(), "docs/.nojekyll is missing"
+    assert "<title>" in page.read_text()[:2000]
+
+
 def test_the_manifest_declares_stdio_transport(manifest):
     assert manifest["packages"][0]["transport"]["type"] == "stdio"
 

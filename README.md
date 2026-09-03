@@ -9,6 +9,7 @@ plain-language data questions by discovering schema and running `SELECT` queries
 The AI does the natural-language → SQL translation; this server just safely
 executes against BigQuery under **your own** Google credentials.
 
+- **Docs:** https://debilla.github.io/bigquery-mcp/
 - **Repo:** https://github.com/deBilla/bigquery-mcp
 - **PyPI:** [`data-platform-mcp`](https://pypi.org/project/data-platform-mcp/)
 - **MCP registry:** mcp-name: io.github.deBilla/data-platform-mcp
