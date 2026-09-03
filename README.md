@@ -209,22 +209,95 @@ config file or a repository.
 
 ---
 
-## Windows and Linux
+## Linux
 
-The server itself is pure Python and platform-independent; only the setup
-differs.
+The same two installs, with no equivalent of the Command Line Tools problem:
 
-- **Linux:** the same two installs, using your package manager or the same
-  `curl | sh` for `uv`. No equivalent of the Command Line Tools problem.
-- **Windows:** install `uv` from <https://astral.sh/uv> and the Google Cloud
-  CLI from its MSI installer. The Claude Desktop config lives at
-  `%APPDATA%\Claude\claude_desktop_config.json`, and paths in it must be
-  absolute with backslashes doubled, e.g.
-  `"C:\\Users\\YOU\\.local\\bin\\uvx.exe"`.
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+tar -xzf google-cloud-cli-linux-x86_64.tar.gz
+./google-cloud-sdk/install.sh --quiet
+./google-cloud-sdk/bin/gcloud auth application-default login
+```
 
-CI runs the test suite on Linux only, and the macOS instructions above were
-exercised on a real machine. **The Windows path is untested** — it follows from
-how the client and the Google libraries work, but nobody has run it end to end.
+Then [check it worked](#4-check-it-worked) and register with your client.
+
+---
+
+## Windows
+
+> **Not verified end to end.** The download URLs and install locations below
+> were checked; the flow itself has not been run on a Windows machine. CI tests
+> Linux only. Treat this as a careful derivation, not a tested recipe — and
+> please open an issue if a step is wrong.
+
+### 1. Install uv
+
+In PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+This installs `uv.exe` and `uvx.exe` into `%USERPROFILE%\.local\bin`. Confirm
+the exact path, because the Desktop config needs it in full:
+
+```powershell
+(Get-Command uvx).Source
+```
+
+### 2. Install the Google Cloud CLI
+
+Download and run
+[GoogleCloudSDKInstaller.exe](https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe).
+Leave **"Bundled Python"** ticked — it is what lets the SDK run without a
+separate Python install, the same property the macOS tarball has.
+
+### 3. Authenticate
+
+In a **new** PowerShell window, so it picks up the updated `PATH`:
+
+```powershell
+gcloud auth application-default login
+gcloud auth application-default set-quota-project your-gcp-project
+```
+
+This writes credentials to
+`%APPDATA%\gcloud\application_default_credentials.json`, which the Google
+libraries read directly — so `gcloud` need not be on `PATH` afterwards.
+
+### 4. Check it worked
+
+```powershell
+$env:BQ_PROJECT="your-gcp-project"; uvx data-platform-mcp doctor
+```
+
+### 5. Configure Claude Desktop
+
+`%APPDATA%\Claude\claude_desktop_config.json` — create it if absent.
+**Backslashes must be doubled in JSON**, and the path must be absolute:
+
+```json
+{
+  "mcpServers": {
+    "bigquery": {
+      "command": "C:\\Users\\YOU\\.local\\bin\\uvx.exe",
+      "args": ["data-platform-mcp"],
+      "env": {
+        "BQ_PROJECT": "your-gcp-project"
+      }
+    }
+  }
+}
+```
+
+Replace `C:\Users\YOU\...` with what `(Get-Command uvx).Source` printed, with
+each `\` written as `\\`. Then fully quit and reopen Claude Desktop.
+
+If it fails, the logs are in `%APPDATA%\Claude\logs\`. `ENOENT` there means the
+`command` path is wrong or its backslashes were not doubled — the same failure
+macOS has, with one extra way to get it wrong.
 
 ---
 
@@ -234,7 +307,7 @@ Each person runs their own local copy. Queries execute under **their own**
 BigQuery/IAM permissions, so existing access controls decide who can see what.
 
 Install the prerequisites for your platform first — [macOS](#macos-setup),
-[Windows and Linux](#windows-and-linux) — then come back here.
+[Linux](#linux), [Windows](#windows) — then come back here.
 
 ### 1. Install
 
@@ -356,7 +429,7 @@ environment: the query succeeded.
 ### 1. Install and authenticate
 
 Do the platform setup first — [macOS](#macos-setup) (two pastes, no Xcode
-tools needed) or [Windows and Linux](#windows-and-linux). You need two things
+tools needed) or [Linux](#linux), [Windows](#windows). You need two things
 from it: the **absolute path** that `which uvx` printed, and a completed
 `gcloud auth application-default login`.
 
