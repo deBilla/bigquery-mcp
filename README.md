@@ -436,12 +436,20 @@ from it: the **absolute path** that `which uvx` printed, and a completed
 
 ### 2. Edit the config
 
+Claude Desktop's **Settings → Connectors** lists hosted connectors; a local
+server like this one is not added there. It goes in a JSON file instead:
+
+**Settings → Developer → Edit Config** opens it. Or edit it directly:
+
 | OS | File |
 | --- | --- |
 | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 
-Create it if it does not exist:
+**The file usually already exists and holds your Desktop preferences.** Add
+`mcpServers` as one more top-level key — do not replace the file, or you will
+lose those settings. If it genuinely does not exist, create it with just the
+block below.
 
 ```json
 {
@@ -460,6 +468,29 @@ Create it if it does not exist:
 Replace `/Users/YOU/.local/bin/uvx` with what `which uvx` printed. On Windows
 the path looks like `C:\\Users\\YOU\\.local\\bin\\uvx.exe`, and backslashes must be
 doubled in JSON.
+
+Merged into a file that already has settings, it looks like this — `mcpServers`
+sits alongside whatever is there, not instead of it:
+
+```json
+{
+  "preferences": { "...": "your existing settings, left alone" },
+  "mcpServers": {
+    "bigquery": {
+      "command": "/Users/YOU/.local/bin/uvx",
+      "args": ["data-platform-mcp"],
+      "env": { "BQ_PROJECT": "your-gcp-project" }
+    }
+  }
+}
+```
+
+Check it still parses before restarting — a stray comma disables **every**
+server, silently:
+
+```bash
+python3 -m json.tool ~/Library/Application\ Support/Claude/claude_desktop_config.json
+```
 
 ### 3. Restart Claude Desktop
 
