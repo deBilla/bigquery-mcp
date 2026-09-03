@@ -138,8 +138,10 @@ a missing toolchain:
 gcloud --version    # not found? install it, link below
 ```
 
-If it is missing, install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
-(macOS: `brew install --cask google-cloud-sdk`), then:
+If it is missing, install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install).
+On macOS, prefer the tarball over Homebrew — Homebrew requires the Xcode
+Command Line Tools, and the tarball does not (see
+[No developer tools?](#no-developer-tools-installed)). Then:
 
 ```bash
 gcloud auth application-default login
@@ -288,6 +290,72 @@ doubled in JSON.
 
 Fully quit and reopen — reloading the window is not enough. The server appears
 under the tools icon in the message box.
+
+### No developer tools installed
+
+An analyst's laptop usually has no Xcode Command Line Tools, and nothing here
+needs them — but it is easy to trip over by accident.
+
+**Terminal.app is not Xcode.** It ships with every Mac. What does *not* ship is
+the Command Line Tools bundle, and `git`, `make`, `clang` and the stock
+`/usr/bin/python3` are stubs for it: running any of them pops a system dialog
+asking to install ~1 GB of developer tooling. Nothing below invokes them.
+
+Both installs use only utilities macOS already has (`curl`, `tar`, `sh`):
+
+```bash
+# 1. uv — a standalone binary. Brings its own Python, so the system one is
+#    never touched.
+curl -LsSf https://astral.sh/uv/install.sh | sh
+which uvx
+
+# 2. Google Cloud CLI — the macOS tarball bundles its own Python too.
+#    Use "-arm" for Apple Silicon, "-x86_64" for Intel; `uname -m` says which.
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz
+tar -xzf google-cloud-cli-darwin-arm.tar.gz
+./google-cloud-sdk/install.sh --quiet
+./google-cloud-sdk/bin/gcloud auth application-default login
+```
+
+That is the whole terminal requirement: two pastes, once. Everything after is
+the JSON config and restarting Claude Desktop.
+
+### Or: no terminal at all, for the analyst
+
+If even that is too much, an admin can do the credential half centrally, and
+the analyst installs nothing but `uv`:
+
+```bash
+# the admin, once, on their own machine
+data-platform-mcp setup --project your-gcp-project --datasets sales,events
+gcloud iam service-accounts keys create analyst-key.json \
+  --iam-account data-platform-mcp-ro@your-gcp-project.iam.gserviceaccount.com
+```
+
+The analyst saves that file and points the config at it:
+
+```json
+{
+  "mcpServers": {
+    "bigquery": {
+      "command": "/Users/YOU/.local/bin/uvx",
+      "args": ["data-platform-mcp"],
+      "env": {
+        "BQ_PROJECT": "your-gcp-project",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/YOU/keys/analyst-key.json"
+      }
+    }
+  }
+}
+```
+
+**The trade-off is real and worth stating.** A key file is a long-lived
+credential sitting on a laptop, where `gcloud auth application-default login`
+issues short-lived tokens tied to a person. It is defensible here because the
+account created by `setup --datasets` can only read the datasets you name, and
+because a key can be revoked centrally the moment a laptop is lost — but it is
+strictly weaker, and it is a per-analyst secret, so do not put it in a shared
+config file or a repository.
 
 ### Managing several warehouses
 

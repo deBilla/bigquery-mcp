@@ -10,6 +10,8 @@ denied" without one leaves the reader unsure which warehouse it was about.
 
 from __future__ import annotations
 
+import os
+
 
 class DataPlatformMCPError(RuntimeError):
     """An error whose message is written to be read by an agent and a human."""
@@ -37,7 +39,24 @@ def explain_exception(exc: Exception, environment: str = "") -> Exception:
     detail = str(exc)
 
     if isinstance(exc, auth_exceptions.DefaultCredentialsError):
-        # This fires both when a login has expired and when the SDK was never
+        # A key file that is missing or malformed raises the same class, but
+        # google-auth's own message names the file and the reason -- which is
+        # more actionable than anything written here. Surfacing the generic
+        # "no credentials" checklist instead sends someone to install an SDK
+        # they do not need, when the real fault is a path they can see.
+        key_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        if key_path:
+            return DataPlatformMCPError(
+                f"{label}: GOOGLE_APPLICATION_CREDENTIALS is set to "
+                f"'{key_path}', but those credentials could not be loaded.\n"
+                f"Underlying error: {detail[:200]}\n"
+                "The variable is set, so this is not a missing login: check the "
+                "path is absolute and the file is the JSON key exactly as "
+                "downloaded. A key file must be readable by the process the MCP "
+                "client launches."
+            )
+        # Otherwise: this fires both when a login has expired and when the SDK
+        # was never
         # installed, and the two look identical from here. Naming the second
         # possibility first saves the user chasing a login command that is not
         # on their PATH -- the failure that actually happened.
