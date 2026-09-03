@@ -96,11 +96,145 @@ process and becomes a grant Google enforces.
 
 ---
 
+## macOS setup
+
+**Terminal.app is not Xcode.** It ships with every Mac. What does *not* ship is
+the **Xcode Command Line Tools**, and an analyst's laptop usually has neither
+those nor Homebrew. Nothing here needs them — but it is easy to trip over by
+accident, because `git`, `make`, `clang` and the stock `/usr/bin/python3` are
+stubs for that bundle: running any of them pops a system dialog offering to
+install about a gigabyte of developer tooling.
+
+None of the commands below invoke one. They use only utilities macOS already
+has — `curl`, `tar`, `sh`, `uname` — because both installs are self-contained:
+
+| Install | Why it needs nothing else |
+| --- | --- |
+| `uv` | A standalone binary. Its installer never mentions Python, and it downloads its own to run the server. |
+| Google Cloud CLI | The macOS tarball bundles its own Python (`.install/bundled-python3-unix-darwin-*`). |
+
+The whole terminal requirement is the three blocks below, once.
+
+### 1. Install uv
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+which uvx      # note this absolute path — Claude Desktop will need it
+```
+
+Typically `/Users/<you>/.local/bin/uvx`.
+
+### 2. Install the Google Cloud CLI
+
+Pick the build for your chip — `uname -m` prints `arm64` for Apple Silicon,
+`x86_64` for Intel:
+
+```bash
+# Apple Silicon
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz
+tar -xzf google-cloud-cli-darwin-arm.tar.gz
+
+# Intel — same, with the other file
+# curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-x86_64.tar.gz
+# tar -xzf google-cloud-cli-darwin-x86_64.tar.gz
+
+./google-cloud-sdk/install.sh --quiet
+```
+
+Avoid `brew install --cask google-cloud-sdk`: Homebrew itself requires the
+Command Line Tools, which is the thing this section exists to avoid.
+
+### 3. Authenticate
+
+```bash
+./google-cloud-sdk/bin/gcloud auth application-default login
+./google-cloud-sdk/bin/gcloud auth application-default set-quota-project your-gcp-project
+```
+
+This writes a credentials file that the Google libraries read directly.
+**`gcloud` does not need to be on your `PATH` afterwards** — it is needed once,
+here. That is why a GUI-launched Claude Desktop can query BigQuery even though
+it cannot see your shell.
+
+> Your account needs **BigQuery Job User** on the project the query runs in, and
+> **BigQuery Data Viewer** on each dataset it reads — often a different project.
+
+### 4. Check it worked
+
+```bash
+BQ_PROJECT=your-gcp-project uvx data-platform-mcp doctor
+```
+
+Then register with your client: [Claude Desktop](#claude-desktop) or
+[Claude Code](#4-register-with-your-ai-client).
+
+### Alternative: no terminal at all for the analyst
+
+If even that is too much, an admin can do the credential half centrally and
+the analyst installs nothing but `uv` — skipping step 2 and step 3 entirely.
+(Nothing about this is macOS-specific; it works the same on any OS.)
+
+```bash
+# the admin, once, on their own machine
+data-platform-mcp setup --project your-gcp-project --datasets sales,events
+gcloud iam service-accounts keys create analyst-key.json \
+  --iam-account data-platform-mcp-ro@your-gcp-project.iam.gserviceaccount.com
+```
+
+The analyst saves that file and points the config at it:
+
+```json
+{
+  "mcpServers": {
+    "bigquery": {
+      "command": "/Users/YOU/.local/bin/uvx",
+      "args": ["data-platform-mcp"],
+      "env": {
+        "BQ_PROJECT": "your-gcp-project",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/YOU/keys/analyst-key.json"
+      }
+    }
+  }
+}
+```
+
+**The trade-off is real and worth stating.** A key file is a long-lived
+credential sitting on a laptop, where `gcloud auth application-default login`
+issues short-lived tokens tied to a person. It is defensible here because the
+account created by `setup --datasets` can only read the datasets you name, and
+because a key can be revoked centrally the moment a laptop is lost — but it is
+strictly weaker, and it is a per-analyst secret, so do not put it in a shared
+config file or a repository.
+
+
+---
+
+## Windows and Linux
+
+The server itself is pure Python and platform-independent; only the setup
+differs.
+
+- **Linux:** the same two installs, using your package manager or the same
+  `curl | sh` for `uv`. No equivalent of the Command Line Tools problem.
+- **Windows:** install `uv` from <https://astral.sh/uv> and the Google Cloud
+  CLI from its MSI installer. The Claude Desktop config lives at
+  `%APPDATA%\Claude\claude_desktop_config.json`, and paths in it must be
+  absolute with backslashes doubled, e.g.
+  `"C:\\Users\\YOU\\.local\\bin\\uvx.exe"`.
+
+CI runs the test suite on Linux only, and the macOS instructions above were
+exercised on a real machine. **The Windows path is untested** — it follows from
+how the client and the Google libraries work, but nobody has run it end to end.
+
+---
+
 ## Quick start (per user)
 
 Each person runs their own local copy. Queries execute under **their own**
 BigQuery/IAM permissions, so existing access controls decide who can see what.
-You need Python 3.11+ and the `gcloud` CLI installed.
+
+Install the prerequisites for your platform first — [macOS](#macos-setup),
+[Windows and Linux](#windows-and-linux) — then come back here.
 
 ### 1. Install
 
@@ -126,34 +260,10 @@ Either way you get a `data-platform-mcp` command, which is what the client runs.
 
 ### 2. Authenticate to Google (one time)
 
-Queries run under **your own** credentials via
+Covered in the platform sections above: [macOS step 3](#3-authenticate), or the
+equivalent `gcloud auth application-default login` elsewhere. Queries then run
+under your own credentials via
 [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials).
-
-**First check the SDK is actually installed.** The most common setup failure is
-a machine with no `gcloud` at all — the server then reports "no Application
-Default Credentials were found", which reads like an expired login rather than
-a missing toolchain:
-
-```bash
-gcloud --version    # not found? install it, link below
-```
-
-If it is missing, install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install).
-On macOS, prefer the tarball over Homebrew — Homebrew requires the Xcode
-Command Line Tools, and the tarball does not (see
-[No developer tools?](#no-developer-tools-installed)). Then:
-
-```bash
-gcloud auth application-default login
-gcloud auth application-default set-quota-project your-gcp-project
-```
-
-The second line matters: some BigQuery APIs bill quota to a project and fail
-without one.
-
-> Your account needs **BigQuery Job User** on the project the query runs in, and
-> **BigQuery Data Viewer** on each dataset it reads — and the dataset is often
-> in a different project from the job. `doctor` checks both.
 
 **Using a service-account key instead?** Set `GOOGLE_APPLICATION_CREDENTIALS`
 to its path — but set it **where the MCP server is launched**, not in a shell:
@@ -243,23 +353,14 @@ on `PATH` for queries to work — it is only needed once, in a terminal, to
 create that file. Verified by running this server with an entirely empty
 environment: the query succeeded.
 
-### 1. Install the server
+### 1. Install and authenticate
 
-In a terminal, once:
+Do the platform setup first — [macOS](#macos-setup) (two pastes, no Xcode
+tools needed) or [Windows and Linux](#windows-and-linux). You need two things
+from it: the **absolute path** that `which uvx` printed, and a completed
+`gcloud auth application-default login`.
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # provides uvx
-which uvx                                          # note the absolute path
-```
-
-Typically `/Users/<you>/.local/bin/uvx`. Use whatever `which` prints.
-
-### 2. Authenticate
-
-Also in a terminal, once — see [step 2](#2-authenticate-to-google-one-time)
-above. This writes the credentials file Desktop will use.
-
-### 3. Edit the config
+### 2. Edit the config
 
 | OS | File |
 | --- | --- |
@@ -286,76 +387,10 @@ Replace `/Users/YOU/.local/bin/uvx` with what `which uvx` printed. On Windows
 the path looks like `C:\\Users\\YOU\\.local\\bin\\uvx.exe`, and backslashes must be
 doubled in JSON.
 
-### 4. Restart Claude Desktop
+### 3. Restart Claude Desktop
 
 Fully quit and reopen — reloading the window is not enough. The server appears
 under the tools icon in the message box.
-
-### No developer tools installed
-
-An analyst's laptop usually has no Xcode Command Line Tools, and nothing here
-needs them — but it is easy to trip over by accident.
-
-**Terminal.app is not Xcode.** It ships with every Mac. What does *not* ship is
-the Command Line Tools bundle, and `git`, `make`, `clang` and the stock
-`/usr/bin/python3` are stubs for it: running any of them pops a system dialog
-asking to install ~1 GB of developer tooling. Nothing below invokes them.
-
-Both installs use only utilities macOS already has (`curl`, `tar`, `sh`):
-
-```bash
-# 1. uv — a standalone binary. Brings its own Python, so the system one is
-#    never touched.
-curl -LsSf https://astral.sh/uv/install.sh | sh
-which uvx
-
-# 2. Google Cloud CLI — the macOS tarball bundles its own Python too.
-#    Use "-arm" for Apple Silicon, "-x86_64" for Intel; `uname -m` says which.
-curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz
-tar -xzf google-cloud-cli-darwin-arm.tar.gz
-./google-cloud-sdk/install.sh --quiet
-./google-cloud-sdk/bin/gcloud auth application-default login
-```
-
-That is the whole terminal requirement: two pastes, once. Everything after is
-the JSON config and restarting Claude Desktop.
-
-### Or: no terminal at all, for the analyst
-
-If even that is too much, an admin can do the credential half centrally, and
-the analyst installs nothing but `uv`:
-
-```bash
-# the admin, once, on their own machine
-data-platform-mcp setup --project your-gcp-project --datasets sales,events
-gcloud iam service-accounts keys create analyst-key.json \
-  --iam-account data-platform-mcp-ro@your-gcp-project.iam.gserviceaccount.com
-```
-
-The analyst saves that file and points the config at it:
-
-```json
-{
-  "mcpServers": {
-    "bigquery": {
-      "command": "/Users/YOU/.local/bin/uvx",
-      "args": ["data-platform-mcp"],
-      "env": {
-        "BQ_PROJECT": "your-gcp-project",
-        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/YOU/keys/analyst-key.json"
-      }
-    }
-  }
-}
-```
-
-**The trade-off is real and worth stating.** A key file is a long-lived
-credential sitting on a laptop, where `gcloud auth application-default login`
-issues short-lived tokens tied to a person. It is defensible here because the
-account created by `setup --datasets` can only read the datasets you name, and
-because a key can be revoked centrally the moment a laptop is lost — but it is
-strictly weaker, and it is a per-analyst secret, so do not put it in a shared
-config file or a repository.
 
 ### Managing several warehouses
 
