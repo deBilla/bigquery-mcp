@@ -420,3 +420,91 @@ def test_server_instructions_bridge_colab_to_the_tools():
     text = _instructions().lower()
     assert "colab" in text
     assert "list_code_assets" in text
+
+
+def test_quota_exhaustion_during_discovery_is_not_reported_as_no_assets(fake_code_assets):
+    """The failure that made this look like a config problem.
+
+    _probe swallowed every GoogleAPIError as "this region is empty", and
+    ResourceExhausted is one. A depleted quota therefore produced "found no
+    code assets in any region" -- asserting absence from a failed lookup, for
+    a project with 616 of them. Same config, same credentials, different
+    answer depending on recent load.
+    """
+    code_asset_tools._discovered.clear()
+    fake_code_assets(
+        locations=["us-central1", "us-east1"],
+        raise_on_list=api_exceptions.ResourceExhausted("slow down"),
+    )
+    with pytest.raises(DataPlatformMCPError) as exc:
+        list_code_assets()
+    message = str(exc.value).lower()
+    assert "no bigquery studio code assets" not in message, (
+        "quota exhaustion must never be reported as absence"
+    )
+    assert "quota" in message or "refill" in message
+
+
+def test_a_403_saying_the_region_is_unknown_is_a_real_answer(fake_code_assets):
+    """Dataform's wording for a region you have nothing in. This one does
+    support concluding "none here"."""
+    code_asset_tools._discovered.clear()
+    fake_code_assets(
+        locations=["us-central1", "us-east1"],
+        raise_on_list=api_exceptions.PermissionDenied(
+            "403 Location us-east1 is not found or access is unauthorized."
+        ),
+    )
+    with pytest.raises(DataPlatformMCPError) as exc:
+        list_code_assets()
+    message = str(exc.value)
+    assert "found no BigQuery Studio code assets" in message
+    assert "all answered successfully" in message
+
+
+def test_a_403_that_is_not_about_the_region_is_not_treated_as_an_answer(fake_code_assets):
+    """GCP reports rate limiting as 403 on some APIs. Classifying by exception
+    type alone is exactly what let a transient failure be reported as absence,
+    so a 403 has to say the region is unknown before it counts as one."""
+    code_asset_tools._discovered.clear()
+    fake_code_assets(
+        locations=["us-central1", "us-east1"],
+        raise_on_list=api_exceptions.PermissionDenied(
+            "403 Quota exceeded for quota metric 'Read requests'"
+        ),
+    )
+    with pytest.raises(DataPlatformMCPError) as exc:
+        list_code_assets()
+    message = str(exc.value)
+    assert "could not determine" in message
+    assert "found no BigQuery Studio code assets" not in message
+
+
+def test_discovery_retries_a_transient_quota_error_and_succeeds(fake_code_assets, no_backoff_sleep):
+    """A single quota blip during a probe must not cost the whole answer."""
+    code_asset_tools._discovered.clear()
+    calls = {"n": 0}
+    repo = FakeRepository("nb", "notebook")
+
+    class Flaky:
+        locations = ["us-central1"]
+
+        def list_locations(self, request=None):
+            return type("R", (), {"locations": [type("L", (), {"location_id": "us-central1"})()]})()
+
+        def list_repositories(self, request=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise api_exceptions.ResourceExhausted("slow down")
+            return iter([repo])
+
+    from data_platform_mcp.tools import code_asset_tools as mod
+
+    fake_code_assets(repos=[])
+    mod._client = lambda env: Flaky()  # noqa: E731
+    try:
+        result = list_code_assets()
+        assert result["location"] == "us-central1"
+        assert result["total_in_project"] == 1
+    finally:
+        mod._client = _real_client

@@ -765,7 +765,7 @@ mismatch would ship a tag pointing at different code than the package claims.
 #      server.json      version  AND  packages[0].version
 
 # 2. tag and push
-git tag v0.3.2 && git push origin v0.3.2
+git tag v0.3.3 && git push origin v0.3.3
 ```
 
 The tag triggers `.github/workflows/release.yml`, which verifies the versions

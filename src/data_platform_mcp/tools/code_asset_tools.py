@@ -107,6 +107,12 @@ _REGIONAL = re.compile(r"\d")
 # assets here and it is where they are in practice.
 _CONVENTIONAL_FIRST = "us-central1"
 
+# Dataform's wording for "this region is not one you have assets in". Anything
+# else behind a 403 is treated as "could not tell" rather than as an answer.
+_NOT_A_REGION = re.compile(
+    r"is not found or access is unauthorized|not found or unauthorized", re.I
+)
+
 # Which regions a BigQuery multi-region could plausibly map to.
 _MULTIREGION_PREFIX = {"us": "us-", "eu": "europe-"}
 
@@ -118,11 +124,18 @@ def _configured_location(env) -> str:
     return (env.code_asset_location or "").strip().lower()
 
 
-def _probe(client, project: str, location: str) -> bool:
-    """Does this region hold any code assets? One page of one result."""
+def _probe(client, project: str, location: str) -> bool | None:
+    """Does this region hold any code assets? One page of one result.
+
+    Returns None for "could not tell", which is not the same as False and must
+    never be collapsed into it: this originally caught every GoogleAPIError as
+    "empty", and since ResourceExhausted is one, a depleted quota reported a
+    project with 616 code assets as having none. Absence is a conclusion, and
+    a failed lookup does not support it.
+    """
     from google.api_core import exceptions as api_exceptions
 
-    try:
+    def once():
         pager = client.list_repositories(
             request={
                 "parent": f"projects/{project}/locations/{location}",
@@ -130,10 +143,21 @@ def _probe(client, project: str, location: str) -> bool:
             }
         )
         return next(iter(pager), None) is not None
-    except api_exceptions.GoogleAPIError:
-        # A region that rejects us is a region without our assets, for this
-        # purpose. A genuine auth failure surfaces from the real call after.
+
+    try:
+        return _retrying(once)
+    except api_exceptions.NotFound:
         return False
+    except api_exceptions.PermissionDenied as exc:
+        # 403 is overloaded. Dataform answers an unused region with
+        # "Location <x> is not found or access is unauthorized", which is a
+        # real answer; GCP also reports rate limiting as 403 on some APIs,
+        # which is not. Only the first licenses "not here", so the message has
+        # to say so -- classifying by exception type alone is what let a
+        # transient failure be reported as absence.
+        return False if _NOT_A_REGION.search(str(exc)) else None
+    except api_exceptions.GoogleAPIError:
+        return None
 
 
 def _candidate_regions(client, project: str, dataset_location: str) -> list[str]:
@@ -142,12 +166,16 @@ def _candidate_regions(client, project: str, dataset_location: str) -> list[str]
     try:
         available = [
             loc.location_id
-            for loc in client.list_locations(
-                request={"name": f"projects/{project}"}
+            for loc in _retrying(
+                lambda: client.list_locations(request={"name": f"projects/{project}"})
             ).locations
         ]
     except Exception:
-        # Discovery is a convenience; never let it be the thing that fails.
+        # Falling back to the conventional region keeps discovery working when
+        # locations cannot be listed. It narrows what gets probed, so the
+        # caller is told when the candidate list came from here rather than
+        # from the API -- "probed one region" and "probed twelve" support very
+        # different conclusions.
         available = [_CONVENTIONAL_FIRST]
 
     matching = [loc for loc in available if not prefix or loc.startswith(prefix)]
@@ -173,22 +201,42 @@ def _discover_location(client, env) -> str:
 
     candidates = _candidate_regions(client, env.project, env.location)
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-        found = list(pool.map(lambda loc: (loc, _probe(client, env.project, loc)), candidates))
+        outcome = dict(
+            pool.map(lambda loc: (loc, _probe(client, env.project, loc)), candidates)
+        )
 
     for loc in candidates:  # candidate order is the preference order
-        if dict(found).get(loc):
+        if outcome.get(loc) is True:
             _discovered[key] = loc
             return loc
 
+    # Nothing found -- but "looked and it is not there" and "could not look"
+    # are different answers, and only the first one licenses "none".
+    unknown = [loc for loc in candidates if outcome.get(loc) is None]
+    if unknown:
+        raise DataPlatformMCPError(
+            f"Environment '{env.name}': could not determine which region holds "
+            f"this project's code assets. {len(unknown)} of "
+            f"{len(candidates)} regions could not be checked "
+            f"({', '.join(unknown[:5])}), most likely the Dataform read quota, "
+            "which refills over tens of seconds -- retrying shortly will "
+            "usually work.\nThis is NOT a report that the project has no code "
+            "assets; that was not established. To skip discovery entirely, set "
+            f"code_asset_location on environment '{env.name}' (or "
+            "BQ_CODE_ASSET_LOCATION) to the region shown in BigQuery Studio > "
+            "Settings."
+        )
     raise DataPlatformMCPError(
         f"Environment '{env.name}': found no BigQuery Studio code assets in "
-        f"any region reachable from location '{env.location}'.\n"
-        f"Probed: {', '.join(candidates)}.\n"
-        "'" + env.location + "' is a multi-region, which Dataform rejects, so "
-        "the region had to be guessed. If the assets are somewhere else, name "
-        "it explicitly -- set code_asset_location on the environment (or "
-        "BQ_CODE_ASSET_LOCATION) to the region shown in BigQuery Studio > "
-        "Settings. If the project genuinely has none, this is the right answer."
+        f"any of the {len(candidates)} regions reachable from location "
+        f"'{env.location}'.\n"
+        f"Probed, all answered successfully: {', '.join(candidates)}.\n"
+        f"'{env.location}' is a multi-region, which Dataform rejects, so the "
+        "region had to be discovered. If the assets are in a region outside "
+        "that list, name it explicitly -- set code_asset_location on the "
+        "environment (or BQ_CODE_ASSET_LOCATION) to the region shown in "
+        "BigQuery Studio > Settings. If the project genuinely has none, this "
+        "is the right answer."
     )
 
 
