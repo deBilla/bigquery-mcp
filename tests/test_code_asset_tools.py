@@ -324,3 +324,23 @@ def test_search_requires_a_table_name(fake_code_assets):
     _corpus(fake_code_assets, {"a": "SELECT 1"})
     with pytest.raises(DataPlatformMCPError):
         find("   ")
+
+
+# --- discoverability --------------------------------------------------------
+
+
+def test_tools_name_the_word_users_actually_say():
+    """These shipped once with no occurrence of "Colab" anywhere, and a user
+    asking about their Colab notebooks was told the server had no such
+    ability. The tools are named for the storage concept, so the user's word
+    has to appear in the descriptions or the tools are unfindable."""
+    for fn in (list_code_assets, get_code_asset, find):
+        assert "colab" in (fn.__doc__ or "").lower(), fn.__name__
+
+
+def test_server_instructions_bridge_colab_to_the_tools():
+    from data_platform_mcp.server import _instructions
+
+    text = _instructions().lower()
+    assert "colab" in text
+    assert "list_code_assets" in text

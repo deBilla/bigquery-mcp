@@ -125,3 +125,12 @@ async def test_the_instructions_carry_the_behaviour_the_evals_check():
     assert "does NOT mean a table is partitioned" in text.replace("\n", " ")
     assert "free" in text  # discovery costs nothing; spend those calls first
     assert "stale" in text
+
+
+async def test_list_environments_reports_the_running_version():
+    """A stale uvx cache runs an old build silently; this is how a user finds
+    out which version is answering them without opening a log file."""
+    from data_platform_mcp import __version__
+    from data_platform_mcp.tools.environment_tools import list_environments
+
+    assert list_environments()["server_version"] == __version__

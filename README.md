@@ -239,7 +239,7 @@ The analyst saves that file and points the config at it:
   "mcpServers": {
     "bigquery": {
       "command": "/Users/YOU/.local/bin/uvx",
-      "args": ["data-platform-mcp"],
+      "args": ["data-platform-mcp@latest"],
       "env": {
         "BQ_PROJECT": "your-gcp-project",
         "GOOGLE_APPLICATION_CREDENTIALS": "/Users/YOU/keys/analyst-key.json"
@@ -334,7 +334,7 @@ $env:BQ_PROJECT="your-gcp-project"; uvx data-platform-mcp doctor
   "mcpServers": {
     "bigquery": {
       "command": "C:\\Users\\YOU\\.local\\bin\\uvx.exe",
-      "args": ["data-platform-mcp"],
+      "args": ["data-platform-mcp@latest"],
       "env": {
         "BQ_PROJECT": "your-gcp-project"
       }
@@ -506,7 +506,7 @@ block below.
   "mcpServers": {
     "bigquery": {
       "command": "/Users/YOU/.local/bin/uvx",
-      "args": ["data-platform-mcp"],
+      "args": ["data-platform-mcp@latest"],
       "env": {
         "BQ_PROJECT": "your-gcp-project"
       }
@@ -528,7 +528,7 @@ sits alongside whatever is there, not instead of it:
   "mcpServers": {
     "bigquery": {
       "command": "/Users/YOU/.local/bin/uvx",
-      "args": ["data-platform-mcp"],
+      "args": ["data-platform-mcp@latest"],
       "env": { "BQ_PROJECT": "your-gcp-project" }
     }
   }
@@ -559,7 +559,7 @@ all, and is identical on every machine:
   "mcpServers": {
     "bigquery": {
       "command": "/Users/YOU/.local/bin/uvx",
-      "args": ["data-platform-mcp"]
+      "args": ["data-platform-mcp@latest"]
     }
   }
 }
@@ -730,6 +730,26 @@ budget, dropping `functools.wraps` from the audit wrapper, letting confirmation
 bypass the hard cap, silencing stale-table detection, and removing the
 allowlist check. Each one fails the suite.
 
+## Upgrading
+
+`uvx` resolves the latest version **on its first run only**, then reuses the
+cached environment indefinitely. A server left as `["data-platform-mcp"]` keeps
+running the build it first downloaded: tools added by a later release are
+simply absent, which reads as "this server cannot do that" rather than as an
+upgrade that has not landed. Pin `@latest` so every start re-resolves:
+
+```json
+"args": ["data-platform-mcp@latest"]
+```
+
+Then **fully quit and reopen** the client. MCP servers are spawned at client
+startup, so a reload leaves the old process running.
+
+To upgrade a one-off without editing config, `uv cache clean data-platform-mcp`
+(or `uv tool upgrade data-platform-mcp` if it was installed with
+`uv tool install`). `list_environments` reports `server_version`, so you can
+confirm what is actually running from inside the conversation.
+
 ## Releasing
 
 Version numbers live in two files and CI refuses a tag where they disagree — a
@@ -742,7 +762,7 @@ mismatch would ship a tag pointing at different code than the package claims.
 #      server.json      version  AND  packages[0].version
 
 # 2. tag and push
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.3.1 && git push origin v0.3.1
 ```
 
 The tag triggers `.github/workflows/release.yml`, which verifies the versions

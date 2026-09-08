@@ -1,5 +1,12 @@
-"""BigQuery Studio code assets: the notebooks, saved queries and data canvases
-people actually work in.
+"""BigQuery Studio code assets: the Colab notebooks, saved queries and data
+canvases people actually work in.
+
+The naming here is a trap worth stating once. Google calls these "code assets";
+users call them Colab notebooks, or just "colab scripts", because BigQuery
+Studio notebooks *are* Colab Enterprise notebooks. The tools are named for the
+storage concept because it covers saved queries too, so every docstring names
+the user's word as well -- a tool nobody can find by the word they use is a
+tool nobody uses.
 
 ``list_scheduled_queries`` answers "what writes this table". This answers the
 question that comes before a schema change -- "what *reads* it" -- and the one
@@ -264,7 +271,11 @@ def list_code_assets(
     name_contains: str = "",
     limit: int = 100,
 ) -> dict:
-    """List BigQuery Studio code assets: notebooks, saved queries, data canvases.
+    """List Colab notebooks and saved queries in BigQuery Studio.
+
+    Use this for anything the user calls a Colab notebook, Colab Enterprise
+    notebook, "colab script", BigQuery notebook, saved query or data canvas --
+    BigQuery Studio stores all of them as code assets and this lists them all.
 
     Free -- this reads metadata only and never opens an asset. Bodies are what
     cost quota, so filter here first and open individual assets afterwards.
@@ -324,7 +335,7 @@ def list_code_assets(
 
 
 def get_code_asset(asset: str, environment: str = "") -> dict:
-    """Return one code asset's contents by display name or id.
+    """Return one Colab notebook or saved query's contents, by name or id.
 
     Notebook outputs are stripped -- across 52 real notebooks they were 77% of
     the bytes, and none of the logic.
@@ -420,7 +431,7 @@ def find_code_assets_using_table(
     asset_type: str = "",
     max_assets: int = _DEFAULT_SCAN_CAP,
 ) -> dict:
-    """Find which notebooks and saved queries reference a table.
+    """Find which Colab notebooks and saved queries reference a table.
 
     The question to ask before changing or dropping a table:
     ``list_scheduled_queries`` says what writes it, this says who reads it.

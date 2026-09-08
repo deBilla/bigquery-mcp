@@ -21,7 +21,14 @@ def list_environments() -> dict:
     server's configuration.
     """
     settings = get_settings()
+    from .. import __version__
+
     return {
+        # A stale uvx cache runs an old build silently: the tools a release
+        # added are simply absent, which reads as "this server cannot do that"
+        # rather than as an upgrade that did not land. Reporting the running
+        # version makes that difference visible without reading a log file.
+        "server_version": __version__,
         "default_environment": settings.default_environment,
         "count": len(settings.environments),
         "environments": [

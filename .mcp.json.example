@@ -2,7 +2,7 @@
   "mcpServers": {
     "bigquery": {
       "command": "uvx",
-      "args": ["data-platform-mcp"],
+      "args": ["data-platform-mcp@latest"],
       "env": {
         "BQ_MCP_ENVIRONMENTS": "{\"warehouse\":{\"project\":\"my-data-platform\",\"impersonate\":\"data-platform-mcp-ro@my-data-platform.iam.gserviceaccount.com\"},\"central\":{\"project\":\"my-data-platform\",\"location\":\"us-central1\"}}",
         "BQ_MCP_DEFAULT_ENVIRONMENT": "warehouse"
