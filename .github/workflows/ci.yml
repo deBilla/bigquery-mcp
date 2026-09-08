@@ -147,8 +147,12 @@ jobs:
           problems = []
           # Guards the exact failure an unpinned mcp dependency caused before:
           # a package that installs cleanly and dies on the first request.
-          if len(tools) != 8:
-              problems.append(f"expected 8 tools, got {len(tools)}")
+          # Deliberately a literal rather than a derived count -- this runs
+          # against the built wheel, so importing the source to ask it how many
+          # tools there should be would defeat the point. Adding a tool means
+          # updating this number AND EXPECTED_TOOLS in tests/test_protocol.py.
+          if len(tools) != 11:
+              problems.append(f"expected 11 tools, got {len(tools)}")
           # A tool that loses its annotations stops declaring itself read-only
           # to the client, which is how this server describes what it is.
           for t in tools:
