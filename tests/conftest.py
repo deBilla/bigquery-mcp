@@ -16,6 +16,7 @@ file, so the suite is deterministic, free, and works with no credentials at all.
 
 from __future__ import annotations
 
+import json
 import os
 
 # Set before any data_platform_mcp import; see the docstring.
@@ -24,10 +25,12 @@ os.environ["BQ_LOCATION"] = "US"
 os.environ["BQ_MCP_AUDIT_LOG"] = "off"
 for _leaked in ("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "BQ_DATASET_ALLOWLIST",
                 "BQ_WARN_BYTES", "BQ_MAX_BYTES_BILLED", "BQ_ROW_LIMIT",
-                "BQ_COST_PER_TIB_USD", "BQ_MCP_LOG_LEVEL"):
+                "BQ_COST_PER_TIB_USD", "BQ_MCP_LOG_LEVEL",
+                "BQ_CODE_ASSET_LOCATION"):
     os.environ.pop(_leaked, None)
 
 import pytest  # noqa: E402
+from google.api_core import exceptions as api_exceptions  # noqa: E402
 
 from data_platform_mcp import clients, config  # noqa: E402
 
@@ -216,3 +219,111 @@ def fake_transfers(monkeypatch):
     holder = FakeTransferClient()
     monkeypatch.setattr(transfer_tools, "_client", lambda _env: holder)
     return holder
+
+
+# --- BigQuery Studio code assets --------------------------------------------
+
+
+class FakeRepository:
+    """One BigQuery Studio code asset, as Dataform returns it.
+
+    ``internal_metadata`` really is a JSON string in the live API, and the
+    tools parse it defensively, so the fake keeps it a string rather than the
+    dict it would be more convenient to assert against.
+    """
+
+    def __init__(self, display_name, asset_type="sql", repo_id="r1",
+                 last_modified="2026-01-01T00:00:00Z", create_time=None,
+                 internal_metadata=None):
+        self.display_name = display_name
+        self.name = f"projects/p/locations/us-central1/repositories/{repo_id}"
+        self.labels = {} if asset_type is None else {
+            "single-file-asset-type": asset_type
+        }
+        self.create_time = create_time
+        self.internal_metadata = (
+            internal_metadata
+            if internal_metadata is not None
+            else json.dumps({"last_modified_time": last_modified})
+        )
+
+
+class FakeDirEntry:
+    def __init__(self, file="", directory=""):
+        self.file = file
+        self.directory = directory
+
+
+class FakeDataformClient:
+    """Stands in for DataformClient.
+
+    ``files`` maps repository id -> {path: text}. Anything asked for outside
+    that map raises NotFound, which is how the real API answers a guessed
+    filename for an asset whose type label is missing.
+    """
+
+    def __init__(self, repos=(), files=None, raise_on_list=None,
+                 raise_on_read=None):
+        self.repos = list(repos)
+        self.files = files or {}
+        self.raise_on_list = raise_on_list
+        self.raise_on_read = raise_on_read
+        self.reads = []
+        self.parents = []
+
+    def list_repositories(self, request=None):
+        self.parents.append((request or {}).get("parent"))
+        if self.raise_on_list:
+            raise self.raise_on_list
+        return iter(self.repos)
+
+    def query_repository_directory_contents(self, request=None):
+        repo_id = request["name"].rsplit("/", 1)[-1]
+        return iter(
+            [FakeDirEntry(file=p) for p in self.files.get(repo_id, {})]
+        )
+
+    def read_repository_file(self, request=None):
+        repo_id = request["name"].rsplit("/", 1)[-1]
+        path = request["path"]
+        self.reads.append((repo_id, path))
+        if self.raise_on_read:
+            raise self.raise_on_read
+        try:
+            body = self.files[repo_id][path]
+        except KeyError:
+            raise api_exceptions.NotFound(f"no such file {path}") from None
+        return type("R", (), {"contents": body.encode()})()
+
+
+@pytest.fixture
+def fake_code_assets(monkeypatch):
+    """Install a fake Dataform client; the test fills it in."""
+    from data_platform_mcp.tools import code_asset_tools
+
+    holder = {}
+
+    def install(**kwargs):
+        client = FakeDataformClient(**kwargs)
+        monkeypatch.setattr(code_asset_tools, "_client", lambda env: client)
+        holder["client"] = client
+        return client
+
+    install.get = lambda: holder.get("client")
+    return install
+
+
+@pytest.fixture
+def no_backoff_sleep(monkeypatch):
+    """Record backoff waits instead of serving them.
+
+    The retry path sleeps for seconds by design; a suite that actually waited
+    would be paying six seconds to assert an error string.
+    """
+    from data_platform_mcp.tools import code_asset_tools
+
+    recorder = type("R", (), {"slept": []})()
+    monkeypatch.setattr(
+        code_asset_tools.time, "sleep", lambda s: recorder.slept.append(s)
+    )
+    return recorder

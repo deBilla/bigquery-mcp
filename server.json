@@ -3,7 +3,7 @@
   "name": "io.github.deBilla/data-platform-mcp",
   "title": "BigQuery Data Platform",
   "description": "Read-only BigQuery tools for plain-language data questions, with a cost gate on every query",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "websiteUrl": "https://debilla.github.io/bigquery-mcp/",
   "repository": {
     "url": "https://github.com/deBilla/bigquery-mcp",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "data-platform-mcp",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -51,6 +51,12 @@
         {
           "name": "BQ_LOCATION",
           "description": "BigQuery location for jobs and datasets. Defaults to US.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "BQ_CODE_ASSET_LOCATION",
+          "description": "Region holding BigQuery Studio notebooks and saved queries. Separate from BQ_LOCATION and usually different: code assets are regional and Dataform rejects multi-regions, so datasets in US typically pair with code assets in a region like us-central1. A wrong region returns an empty list rather than an error. Defaults to BQ_LOCATION.",
           "isRequired": false,
           "isSecret": false
         },

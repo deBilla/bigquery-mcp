@@ -28,6 +28,7 @@ from . import __version__
 from .config import describe_environments
 from .observability import configure_logging, logger
 from .tools import (
+    code_asset_tools,
     discovery_tools,
     environment_tools,
     query_tools,
@@ -54,6 +55,17 @@ def _instructions() -> str:
         "and whether it is disabled or failing — usually the actual answer to "
         "\"why has this not updated\", and cheaper than reasoning about the "
         "data. get_scheduled_query returns one query's SQL and recent runs.\n\n"
+        "BEFORE CHANGING OR DROPPING A TABLE, FIND WHO READS IT. "
+        "list_scheduled_queries says what writes a table; "
+        "find_code_assets_using_table says which notebooks and saved queries "
+        "read it. That search opens each asset it considers, so it is the one "
+        "discovery tool that is not free of quota -- narrow it with "
+        "asset_type, and treat its answer as evidence about the assets it "
+        "scanned rather than proof no others use the table. list_code_assets "
+        "is free and lists what exists; get_code_asset returns one body, with "
+        "notebook outputs stripped. Saved queries usually outnumber notebooks "
+        "several times over, so logic you cannot find in a scheduled query is "
+        "often a saved query someone runs by hand.\n\n"
         "CHECK FRESHNESS BEFORE TRUSTING A TABLE you have not used before. "
         "Some tables on this platform stopped being written to without being "
         "dropped, so they return stale data rather than an error. If "
@@ -86,7 +98,13 @@ def _instructions() -> str:
 
 mcp = FastMCP("data-platform", instructions=_instructions())
 
-for module in (environment_tools, discovery_tools, transfer_tools, query_tools):
+for module in (
+    environment_tools,
+    discovery_tools,
+    transfer_tools,
+    code_asset_tools,
+    query_tools,
+):
     module.register(mcp)
 
 

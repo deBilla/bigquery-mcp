@@ -27,6 +27,9 @@ executes against BigQuery under **your own** Google credentials.
 | `list_environments` | Which BigQuery environments are configured, and the default | free |
 | `list_scheduled_queries` | Which scheduled query writes a table, and whether it is disabled or failing | free |
 | `get_scheduled_query` | One query's SQL, destination and recent runs | free |
+| `list_code_assets` | Notebooks, saved queries and data canvases in BigQuery Studio | free |
+| `get_code_asset` | One notebook or saved query's body, notebook outputs stripped | free |
+| `find_code_assets_using_table` | Which notebooks/saved queries **read** a table | quota, not $ |
 | `run_query` | Run a validated, read-only `SELECT` and return rows | scans data |
 
 Only `run_query` costs anything, so the discovery tools are the ones to spend
@@ -39,6 +42,14 @@ first. Two of them exist to prevent specific, repeated mistakes:
 - **`check_table_freshness` finds tables that stopped being written to** without
   being dropped. Those return stale data rather than an error, which is the
   failure mode nobody notices.
+- **`find_code_assets_using_table` answers the other half.** The scheduled-query
+  tools say what *writes* a table; this says who *reads* it, which is the
+  question before a schema change. It is also the one discovery tool that is
+  not free: it opens every asset it considers, spending Dataform read quota,
+  so it is capped and reports how much of the project it actually covered. A
+  result is evidence about the assets scanned, never proof that nothing else
+  uses the table — assets it could not read are listed separately rather than
+  counted as misses.
 - **`list_scheduled_queries` says why.** A stale table is usually a scheduled
   query that was disabled or is failing, and that lives in a different API
   (BigQuery Data Transfer) needing `roles/bigquerydatatransfer.viewer`. Without
@@ -46,6 +57,36 @@ first. Two of them exist to prevent specific, repeated mistakes:
   normally. Most scheduled queries declare no destination because they write
   with DDL, so the target is read out of the SQL and reported as
   `writes_to_from_sql` — a heuristic, labelled as one.
+
+---
+
+## BigQuery Studio notebooks and saved queries
+
+These are not BigQuery resources. BigQuery Studio stores each code asset as a
+**Dataform repository** holding a single file, which means a third API and a
+third permission — `roles/dataform.viewer` — beyond BigQuery and the Data
+Transfer Service. Without it the three tools return an error naming the role
+and everything else works normally. They are also invisible in the Dataform UI,
+so nothing in the console hints that this is where they live.
+
+Two things about that storage are worth knowing before you configure it:
+
+- **Code assets are regional, and it is not the dataset region.** Dataform
+  rejects multi-regions, so a platform whose datasets are `US` keeps its
+  notebooks in something like `us-central1`. Set `code_asset_location` per
+  environment (or `BQ_CODE_ASSET_LOCATION`); it does **not** inherit
+  `location`, because inheriting it would fail everywhere it mattered. A
+  valid-but-wrong region is the quiet failure: it returns an empty list rather
+  than an error, so every result echoes back the location it read.
+
+- **Notebook bodies are mostly output.** Across 52 real notebooks, cell outputs
+  were 77% of the bytes — one was 1.44 MB of file for 80 KB of code. Outputs
+  are stripped before anything is returned, and the saving is reported so you
+  can see that what is missing was rendered charts rather than logic.
+
+Reads are quota-limited by volume rather than by concurrency, and the quota
+refills over tens of seconds. Exhaustion is retried with backoff and, if it
+persists, reported as something to retry shortly rather than as a failure.
 
 ---
 
@@ -701,7 +742,7 @@ mismatch would ship a tag pointing at different code than the package claims.
 #      server.json      version  AND  packages[0].version
 
 # 2. tag and push
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
 The tag triggers `.github/workflows/release.yml`, which verifies the versions

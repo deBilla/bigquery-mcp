@@ -90,6 +90,11 @@ class Environment:
     name: str
     project: str
     location: str = DEFAULT_LOCATION
+    # BigQuery Studio code assets are regional and multi-regions are rejected,
+    # so this cannot inherit `location`: a platform whose datasets are 'US'
+    # keeps its notebooks in a region like 'us-central1'. Empty means "fall
+    # back to location and let the tool explain itself if that is wrong".
+    code_asset_location: str = ""
     impersonate: str = ""
     dataset_allowlist: frozenset[str] = frozenset()
     max_bytes_billed: int = DEFAULT_MAX_BYTES_BILLED
@@ -203,6 +208,9 @@ def _build_environment(name: str, spec, defaults: dict) -> Environment:
         name=key,
         project=project,
         location=str(spec.get("location") or defaults["location"]).strip(),
+        code_asset_location=str(
+            spec.get("code_asset_location") or defaults["code_asset_location"]
+        ).strip(),
         impersonate=str(spec.get("impersonate") or defaults["impersonate"]).strip(),
         dataset_allowlist=(
             _as_allowlist(spec["dataset_allowlist"])
@@ -227,6 +235,7 @@ def _global_defaults() -> dict:
     """
     return {
         "location": os.environ.get("BQ_LOCATION", "").strip() or DEFAULT_LOCATION,
+        "code_asset_location": os.environ.get("BQ_CODE_ASSET_LOCATION", "").strip(),
         "impersonate": os.environ.get("BQ_IMPERSONATE_SERVICE_ACCOUNT", "").strip(),
         "dataset_allowlist": _as_allowlist(os.environ.get("BQ_DATASET_ALLOWLIST", "")),
         "max_bytes_billed": _env_int("BQ_MAX_BYTES_BILLED", DEFAULT_MAX_BYTES_BILLED),
@@ -305,6 +314,7 @@ def get_settings() -> Settings:
                 name="default",
                 project=_resolve_project(),
                 location=defaults["location"],
+                code_asset_location=defaults["code_asset_location"],
                 impersonate=defaults["impersonate"],
                 dataset_allowlist=defaults["dataset_allowlist"],
                 max_bytes_billed=defaults["max_bytes_billed"],

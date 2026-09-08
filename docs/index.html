@@ -248,6 +248,9 @@ google-cloud-bigquery Python client, which has no such cap.</pre>
       <tr><td><code>check_table_freshness</code></td><td>When each table was last written</td><td>free</td></tr>
       <tr><td><code>list_scheduled_queries</code></td><td>What writes a table, and whether it is disabled or failing</td><td>free</td></tr>
       <tr><td><code>get_scheduled_query</code></td><td>One query's SQL, destination and recent runs</td><td>free</td></tr>
+      <tr><td><code>list_code_assets</code></td><td>Notebooks, saved queries and data canvases in BigQuery Studio</td><td>free</td></tr>
+      <tr><td><code>get_code_asset</code></td><td>One notebook or saved query, notebook outputs stripped</td><td>free</td></tr>
+      <tr><td><code>find_code_assets_using_table</code></td><td>Which notebooks and saved queries <strong>read</strong> a table</td><td>quota</td></tr>
       <tr><td><code>run_query</code></td><td>A validated, read-only <code>SELECT</code></td><td>scans data</td></tr>
     </tbody>
   </table></div>

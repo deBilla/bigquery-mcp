@@ -80,7 +80,16 @@ jobs:
             echo "::error::a mutating Data Transfer call appears in src/"
             exit 1
           fi
-          echo "no mutating BigQuery or Data Transfer calls in src/"
+          # Dataform is a full source-control API: it can commit, write and
+          # delete files as well as create and destroy the repositories that
+          # hold BigQuery Studio notebooks. code_asset_tools registers only
+          # reads, and this is what keeps that true.
+          dataform='\.(create|update|delete)_(repository|workspace|release_config|workflow_config)\(|\.(commit_repository_changes|commit_workspace_changes|write_file|remove_file|move_file|make_directory|remove_directory|move_directory|push_git_commits|pull_git_commits|reset_workspace_changes|create_compilation_result|create_workflow_invocation|cancel_workflow_invocation|delete_workflow_invocation)\('
+          if grep -rEn "$dataform" src/; then
+            echo "::error::a mutating Dataform call appears in src/"
+            exit 1
+          fi
+          echo "no mutating BigQuery, Data Transfer or Dataform calls in src/"
 
   package:
     runs-on: ubuntu-latest

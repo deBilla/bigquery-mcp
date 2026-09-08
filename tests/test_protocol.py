@@ -27,6 +27,9 @@ EXPECTED_TOOLS = {
     "run_query",
     "list_scheduled_queries",
     "get_scheduled_query",
+    "list_code_assets",
+    "get_code_asset",
+    "find_code_assets_using_table",
 }
 
 

@@ -22,6 +22,15 @@ project = "my-data-platform"
 # neither location — it reads as a missing table. One environment per location.
 location = "US"
 
+# Where BigQuery Studio keeps this project's notebooks and saved queries.
+# Deliberately separate from `location`, because it is usually different: code
+# assets are regional and Dataform rejects multi-regions outright, so a
+# platform whose datasets are "US" keeps its notebooks somewhere like
+# us-central1. Getting it wrong is quiet — a valid-but-wrong region returns an
+# empty list rather than an error, which reads as "no notebooks here".
+# BigQuery Studio > Settings shows the region. Leave unset to reuse `location`.
+code_asset_location = "us-central1"
+
 # Read-only service account to impersonate. This is what makes "read-only" a
 # property of the identity rather than a promise about the code: point it at an
 # account holding only jobUser and a dataset-scoped dataViewer and no tool can
