@@ -58,27 +58,103 @@ def test_code_asset_location_does_not_inherit_the_dataset_location(monkeypatch):
     assert code_asset_tools._location(env) == "us-central1"
 
 
-def test_location_falls_back_to_dataset_location_when_unset():
+def test_a_regional_dataset_location_is_used_as_given():
+    """Only multi-regions need discovering; a real region is already usable."""
     clear_caches()
     from data_platform_mcp.config import require_environment
 
-    assert code_asset_tools._location(require_environment()) == "us"
+    env = require_environment()
+    regional = type(env)(**{**env.__dict__, "location": "us-west2"})
+    assert code_asset_tools._location(regional) == "us-west2"
 
 
-def test_empty_result_says_it_may_be_the_wrong_region(fake_code_assets):
-    """A wrong region returns zero assets, not an error. Without this note the
-    answer 'you have no notebooks' is indistinguishable from the truth."""
+def test_empty_result_for_a_pinned_region_says_it_may_be_wrong(monkeypatch, fake_code_assets):
+    """A wrong pinned region returns zero assets, not an error. Without this
+    note 'you have no notebooks' is indistinguishable from the truth."""
+    monkeypatch.setenv("BQ_CODE_ASSET_LOCATION", "us-west2")
+    clear_caches()
     fake_code_assets(repos=[])
     result = list_code_assets()
     assert result["total_in_project"] == 0
-    assert "regional" in result["note"]
-    assert result["location"] == "us"
+    assert "us-west2" in result["note"]
 
 
-def test_every_result_states_the_location_it_read(fake_code_assets):
+def test_every_result_states_the_location_it_read(monkeypatch, fake_code_assets):
+    monkeypatch.setenv("BQ_CODE_ASSET_LOCATION", "us-west2")
+    clear_caches()
     fake_code_assets(repos=[FakeRepository("a")])
-    assert list_code_assets()["location"] == "us"
-    assert "us" in fake_code_assets.get().parents[0]
+    assert list_code_assets()["location"] == "us-west2"
+    assert "us-west2" in fake_code_assets.get().parents[0]
+
+
+# --- region discovery -------------------------------------------------------
+
+
+def test_multiregion_is_discovered_around_not_passed_through(fake_code_assets):
+    """The bug this exists for: the dataset location US is not merely a wrong
+    guess, it is one Dataform rejects outright, so honouring it guarantees the
+    failure. A team hit this and had to hand-edit config and restart."""
+    code_asset_tools._discovered.clear()
+    fake_code_assets(
+        locations=["us-east1", "us-central1", "europe-west1"],
+        repos_by_location={"us-central1": [FakeRepository("nb", "notebook")]},
+    )
+    result = list_code_assets()
+    assert result["location"] == "us-central1"
+    assert result["total_in_project"] == 1
+    assert "multi-region" in result["location_note"]
+    assert 'code_asset_location = "us-central1"' in result["location_note"]
+
+
+def test_discovery_only_probes_regions_in_the_multiregion(fake_code_assets):
+    """Probing europe for a US multi-region spends quota to learn nothing."""
+    code_asset_tools._discovered.clear()
+    client = fake_code_assets(
+        locations=["us-central1", "us-east1", "europe-west1", "asia-south1"],
+        repos_by_location={"us-central1": [FakeRepository("nb", "notebook")]},
+    )
+    list_code_assets()
+    probed = {p.rsplit("/", 1)[-1] for p in client.parents}
+    assert not any(p.startswith(("europe", "asia")) for p in probed), probed
+
+
+def test_an_explicit_location_is_never_second_guessed(monkeypatch, fake_code_assets):
+    """Configuration is an instruction, not a hint: probing past it would make
+    a deliberately-pinned region unpredictable."""
+    monkeypatch.setenv("BQ_CODE_ASSET_LOCATION", "us-east1")
+    clear_caches()
+    code_asset_tools._discovered.clear()
+    client = fake_code_assets(
+        locations=["us-central1", "us-east1"],
+        repos_by_location={"us-central1": [FakeRepository("elsewhere", "sql")]},
+    )
+    result = list_code_assets()
+    assert result["location"] == "us-east1"
+    assert result["total_in_project"] == 0
+    assert "location_note" not in result
+    assert all("us-east1" in p for p in client.parents)
+
+
+def test_discovery_is_cached_per_environment(fake_code_assets):
+    code_asset_tools._discovered.clear()
+    client = fake_code_assets(
+        locations=["us-central1", "us-east1"],
+        repos_by_location={"us-central1": [FakeRepository("nb", "notebook")]},
+    )
+    list_code_assets()
+    first = len(client.parents)
+    list_code_assets()
+    assert len(client.parents) == first + 1, "second call should not re-probe"
+
+
+def test_finding_nothing_anywhere_names_what_was_probed(fake_code_assets):
+    code_asset_tools._discovered.clear()
+    fake_code_assets(locations=["us-central1", "us-east1"], repos_by_location={})
+    with pytest.raises(DataPlatformMCPError) as exc:
+        list_code_assets()
+    message = str(exc.value)
+    assert "us-central1" in message and "us-east1" in message
+    assert "code_asset_location" in message
 
 
 # --- listing ----------------------------------------------------------------

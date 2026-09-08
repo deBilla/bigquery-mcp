@@ -73,11 +73,14 @@ Two things about that storage are worth knowing before you configure it:
 
 - **Code assets are regional, and it is not the dataset region.** Dataform
   rejects multi-regions, so a platform whose datasets are `US` keeps its
-  notebooks in something like `us-central1`. Set `code_asset_location` per
-  environment (or `BQ_CODE_ASSET_LOCATION`); it does **not** inherit
-  `location`, because inheriting it would fail everywhere it mattered. A
-  valid-but-wrong region is the quiet failure: it returns an empty list rather
-  than an error, so every result echoes back the location it read.
+  notebooks in something like `us-central1`. **No configuration is needed:**
+  when `location` is a multi-region the server probes the regions inside it,
+  uses the one holding the assets, and says so — a multi-region cannot simply
+  be inherited, because using it is guaranteed to fail rather than merely
+  likely to. Pin `code_asset_location` (or `BQ_CODE_ASSET_LOCATION`) to skip
+  the probing; an explicit value is never second-guessed, so a wrong one
+  returns an empty list rather than an error. Every result echoes back the
+  location it read.
 
 - **Notebook bodies are mostly output.** Across 52 real notebooks, cell outputs
   were 77% of the bytes — one was 1.44 MB of file for 80 KB of code. Outputs
@@ -762,7 +765,7 @@ mismatch would ship a tag pointing at different code than the package claims.
 #      server.json      version  AND  packages[0].version
 
 # 2. tag and push
-git tag v0.3.1 && git push origin v0.3.1
+git tag v0.3.2 && git push origin v0.3.2
 ```
 
 The tag triggers `.github/workflows/release.yml`, which verifies the versions

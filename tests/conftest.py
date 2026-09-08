@@ -263,18 +263,32 @@ class FakeDataformClient:
     """
 
     def __init__(self, repos=(), files=None, raise_on_list=None,
-                 raise_on_read=None):
+                 raise_on_read=None, locations=("us-central1", "us-east1"),
+                 repos_by_location=None):
         self.repos = list(repos)
         self.files = files or {}
         self.raise_on_list = raise_on_list
         self.raise_on_read = raise_on_read
+        self.locations = list(locations)
+        # When set, region discovery is exercised: only these locations hold
+        # anything. Otherwise every location returns the same repos, which is
+        # what most tests want.
+        self.repos_by_location = repos_by_location
         self.reads = []
         self.parents = []
 
+    def list_locations(self, request=None):
+        entries = [type("L", (), {"location_id": loc})() for loc in self.locations]
+        return type("R", (), {"locations": entries})()
+
     def list_repositories(self, request=None):
-        self.parents.append((request or {}).get("parent"))
+        parent = (request or {}).get("parent")
+        self.parents.append(parent)
         if self.raise_on_list:
             raise self.raise_on_list
+        if self.repos_by_location is not None:
+            location = parent.rsplit("/", 1)[-1]
+            return iter(self.repos_by_location.get(location, []))
         return iter(self.repos)
 
     def query_repository_directory_contents(self, request=None):

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -97,24 +98,126 @@ def _client(env):
     return dataform_v1beta1.DataformClient(credentials=get_credentials(env.impersonate))
 
 
-def _location(env) -> str:
-    """The region holding this environment's code assets.
+# A regional location carries a digit (us-central1); a multi-region does not
+# (US, EU). Dataform rejects multi-regions, so one cannot be used or guessed
+# from -- it has to be discovered.
+_REGIONAL = re.compile(r"\d")
 
-    Deliberately separate from ``env.location``. A dataset location is often a
-    multi-region (``US``), and Dataform rejects those outright -- so inheriting
-    it would make the tools fail everywhere they were most useful.
-    """
-    return (env.code_asset_location or env.location).strip().lower()
+# Tried first when discovering, because BigQuery Studio defaults new code
+# assets here and it is where they are in practice.
+_CONVENTIONAL_FIRST = "us-central1"
+
+# Which regions a BigQuery multi-region could plausibly map to.
+_MULTIREGION_PREFIX = {"us": "us-", "eu": "europe-"}
+
+# Discovery costs a handful of calls, so each environment pays it once.
+_discovered: dict[tuple[str, str], str] = {}
 
 
-def _parent(env) -> str:
-    return f"projects/{env.project}/locations/{_location(env)}"
+def _configured_location(env) -> str:
+    return (env.code_asset_location or "").strip().lower()
 
 
-def _explain_dataform_failure(exc: Exception, env) -> Exception:
+def _probe(client, project: str, location: str) -> bool:
+    """Does this region hold any code assets? One page of one result."""
     from google.api_core import exceptions as api_exceptions
 
-    loc = _location(env)
+    try:
+        pager = client.list_repositories(
+            request={
+                "parent": f"projects/{project}/locations/{location}",
+                "page_size": 1,
+            }
+        )
+        return next(iter(pager), None) is not None
+    except api_exceptions.GoogleAPIError:
+        # A region that rejects us is a region without our assets, for this
+        # purpose. A genuine auth failure surfaces from the real call after.
+        return False
+
+
+def _candidate_regions(client, project: str, dataset_location: str) -> list[str]:
+    """Regions worth probing, most likely first."""
+    prefix = _MULTIREGION_PREFIX.get(dataset_location.lower().strip(), "")
+    try:
+        available = [
+            loc.location_id
+            for loc in client.list_locations(
+                request={"name": f"projects/{project}"}
+            ).locations
+        ]
+    except Exception:
+        # Discovery is a convenience; never let it be the thing that fails.
+        available = [_CONVENTIONAL_FIRST]
+
+    matching = [loc for loc in available if not prefix or loc.startswith(prefix)]
+    ordered = ([_CONVENTIONAL_FIRST] if _CONVENTIONAL_FIRST in matching else []) + [
+        loc for loc in matching if loc != _CONVENTIONAL_FIRST
+    ]
+    # Probing forty regions to answer one question is not a convenience.
+    return ordered[:12]
+
+
+def _discover_location(client, env) -> str:
+    """Find the region holding this project's code assets.
+
+    Reached when the configured location is a multi-region, which can never
+    work: Dataform rejects ``US`` outright, so honouring it would guarantee
+    the failure this exists to avoid. Discovery replaces a config edit and a
+    client restart with a few one-row probes, and the result says which region
+    it found so it can be pinned.
+    """
+    key = (env.project, env.location.lower())
+    if key in _discovered:
+        return _discovered[key]
+
+    candidates = _candidate_regions(client, env.project, env.location)
+    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+        found = list(pool.map(lambda loc: (loc, _probe(client, env.project, loc)), candidates))
+
+    for loc in candidates:  # candidate order is the preference order
+        if dict(found).get(loc):
+            _discovered[key] = loc
+            return loc
+
+    raise DataPlatformMCPError(
+        f"Environment '{env.name}': found no BigQuery Studio code assets in "
+        f"any region reachable from location '{env.location}'.\n"
+        f"Probed: {', '.join(candidates)}.\n"
+        "'" + env.location + "' is a multi-region, which Dataform rejects, so "
+        "the region had to be guessed. If the assets are somewhere else, name "
+        "it explicitly -- set code_asset_location on the environment (or "
+        "BQ_CODE_ASSET_LOCATION) to the region shown in BigQuery Studio > "
+        "Settings. If the project genuinely has none, this is the right answer."
+    )
+
+
+def _location(env, client=None) -> str:
+    """The region holding this environment's code assets.
+
+    Explicit configuration always wins. A configured *regional* dataset
+    location is used as-is. A multi-region is discovered around, because using
+    it is not an option -- see _discover_location.
+    """
+    configured = _configured_location(env)
+    if configured:
+        return configured
+    dataset_location = env.location.strip().lower()
+    if _REGIONAL.search(dataset_location):
+        return dataset_location
+    if client is None:
+        return dataset_location
+    return _discover_location(client, env)
+
+
+def _parent(env, client=None) -> str:
+    return f"projects/{env.project}/locations/{_location(env, client)}"
+
+
+def _explain_dataform_failure(exc: Exception, env, loc: str = "") -> Exception:
+    from google.api_core import exceptions as api_exceptions
+
+    loc = loc or _configured_location(env) or env.location
     if isinstance(exc, api_exceptions.PermissionDenied):
         identity = env.impersonate or "the signed-in user"
         # A bad location and a missing role both arrive as 403 here, and the
@@ -193,11 +296,19 @@ def _summarise(repo) -> dict:
     }
 
 
-def _list_repositories(client, env) -> list:
+def _list_repositories(client, env) -> tuple[list, str]:
+    """Every tool's single entry point, so location resolution lives here.
+
+    Returns the repositories and the location they came from -- the caller
+    reports it, and after discovery it is not knowable any other way.
+    """
+    location = _location(env, client)
+    parent = f"projects/{env.project}/locations/{location}"
     try:
-        return list(_retrying(lambda: list(client.list_repositories(request={"parent": _parent(env)}))))
+        repos = _retrying(lambda: list(client.list_repositories(request={"parent": parent})))
     except Exception as exc:
-        raise _explain_dataform_failure(exc, env) from exc
+        raise _explain_dataform_failure(exc, env, location) from exc
+    return repos, location
 
 
 def _read_body(client, repo) -> str:
@@ -290,7 +401,7 @@ def list_code_assets(
     """
     env = require_environment(environment)
     client = _client(env)
-    repos = _list_repositories(client, env)
+    repos, location = _list_repositories(client, env)
 
     counts: dict[str, int] = {}
     for repo in repos:
@@ -313,12 +424,19 @@ def list_code_assets(
         "project": env.project,
         # Always stated: an empty list here usually means the wrong region
         # rather than an empty project, and that is invisible otherwise.
-        "location": _location(env),
+        "location": location,
         "total_in_project": len(repos),
         "by_type": counts,
         "matched": len(matched),
         "assets": [_summarise(repo) for repo in shown],
     }
+    if not _configured_location(env) and location != env.location.strip().lower():
+        result["location_note"] = (
+            f"'{env.location}' is a multi-region, which Dataform rejects, so "
+            f"'{location}' was discovered by probing. Set "
+            f"code_asset_location = \"{location}\" on environment "
+            f"'{env.name}' to skip that on future calls."
+        )
     if len(shown) < len(matched):
         result["truncated"] = (
             f"Showing {len(shown)} of {len(matched)} matching assets. Narrow "
@@ -326,10 +444,10 @@ def list_code_assets(
         )
     if not repos:
         result["note"] = (
-            f"No code assets in '{_location(env)}'. Code assets are regional "
-            "and a wrong region returns empty rather than erroring, so check "
-            "the region in BigQuery Studio settings before concluding there "
-            "are none."
+            f"No code assets in '{location}'. This location was used as "
+            "given rather than discovered, and a wrong region returns empty "
+            "rather than erroring -- check the region in BigQuery Studio > "
+            "Settings before concluding the project has none."
         )
     return result
 
@@ -346,7 +464,7 @@ def get_code_asset(asset: str, environment: str = "") -> dict:
     """
     env = require_environment(environment)
     client = _client(env)
-    repos = _list_repositories(client, env)
+    repos, location = _list_repositories(client, env)
 
     wanted = asset.strip().lower()
     exact = [
@@ -359,7 +477,7 @@ def get_code_asset(asset: str, environment: str = "") -> dict:
         near = [r.display_name for r in repos if wanted in (r.display_name or "").lower()]
         raise DataPlatformMCPError(
             f"No code asset named '{asset}' in environment '{env.name}' "
-            f"(location {_location(env)})."
+            f"(location {location})."
             + (
                 "\nDid you mean: " + ", ".join(near[:10])
                 if near
@@ -388,7 +506,7 @@ def get_code_asset(asset: str, environment: str = "") -> dict:
         raise _explain_dataform_failure(exc, env) from exc
 
     result = _summarise(repo)
-    result.update({"environment": env.name, "project": env.project, "location": _location(env)})
+    result.update({"environment": env.name, "project": env.project, "location": location})
 
     if _asset_type(repo) == "notebook":
         cells, stats = _notebook_source(body)
@@ -450,7 +568,7 @@ def find_code_assets_using_table(
     """
     env = require_environment(environment)
     client = _client(env)
-    repos = _list_repositories(client, env)
+    repos, location = _list_repositories(client, env)
 
     wanted = asset_type.strip().lower()
     if wanted:
@@ -505,7 +623,7 @@ def find_code_assets_using_table(
     result = {
         "environment": env.name,
         "project": env.project,
-        "location": _location(env),
+        "location": location,
         "searched_for": needle,
         "assets_scanned": len(scanned),
         "assets_available": len(repos),
