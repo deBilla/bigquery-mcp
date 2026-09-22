@@ -155,6 +155,17 @@ run gcloud projects add-iam-policy-binding "$PROJECT" \
   --condition None \
   --quiet >/dev/null
 
+# 3c. Scheduled Colab notebooks live in Vertex AI -- a fourth API and a fourth
+#     permission. Optional in the same way: without it the three notebook-
+#     schedule tools report a clear error naming this role and nothing else is
+#     affected.
+echo "[ .. ] granting roles/aiplatform.viewer on $PROJECT (scheduled notebooks)"
+run gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member "serviceAccount:${SA_EMAIL}" \
+  --role roles/aiplatform.viewer \
+  --condition None \
+  --quiet >/dev/null
+
 # 4. Let the human impersonate it. Without this the server cannot mint a token
 #    and fails at the first query with a 403 naming neither account nor role.
 echo "[ .. ] granting roles/iam.serviceAccountTokenCreator on the account to $MEMBER"

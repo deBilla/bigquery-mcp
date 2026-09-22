@@ -89,7 +89,17 @@ jobs:
             echo "::error::a mutating Dataform call appears in src/"
             exit 1
           fi
-          echo "no mutating BigQuery, Data Transfer or Dataform calls in src/"
+          # Vertex AI is reached over plain REST rather than through a
+          # client library, so none of the greps above can see it. Its
+          # schedules can be paused, resumed and deleted by HTTP verb, and a
+          # notebook execution can be created -- so the guarantee for that
+          # surface is that nothing in src/ issues anything but a GET.
+          verbs='\.(post|put|patch|delete)\(|\.request\(|:(pause|resume|cancel)"'
+          if grep -rEn "$verbs" src/; then
+            echo "::error::a non-GET HTTP call appears in src/"
+            exit 1
+          fi
+          echo "no mutating BigQuery, Data Transfer, Dataform or Vertex AI calls in src/"
 
   package:
     runs-on: ubuntu-latest
@@ -151,8 +161,8 @@ jobs:
           # against the built wheel, so importing the source to ask it how many
           # tools there should be would defeat the point. Adding a tool means
           # updating this number AND EXPECTED_TOOLS in tests/test_protocol.py.
-          if len(tools) != 11:
-              problems.append(f"expected 11 tools, got {len(tools)}")
+          if len(tools) != 14:
+              problems.append(f"expected 14 tools, got {len(tools)}")
           # A tool that loses its annotations stops declaring itself read-only
           # to the client, which is how this server describes what it is.
           for t in tools:

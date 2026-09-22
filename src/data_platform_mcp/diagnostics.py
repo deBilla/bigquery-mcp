@@ -298,6 +298,39 @@ def _check_scheduled_queries(env: Environment) -> bool:
     return True
 
 
+def _check_notebook_schedules(env: Environment) -> bool:
+    """Scheduled Colab notebooks need a fourth role, on Vertex AI.
+
+    Never fatal, for the same reason as scheduled queries: the server is fully
+    usable without it. Reports the failing-run count rather than just "readable"
+    -- the whole point of these tools is that a schedule looks healthy while its
+    runs fail, and a doctor line saying "OK" would repeat that mistake.
+    """
+    try:
+        from .tools.schedule_tools import list_notebook_schedules
+
+        result = list_notebook_schedules(env.name, lookback_days=7)
+    except Exception as exc:
+        _line(SKIP, "notebook schedules unavailable")
+        _fix(
+            f"{str(exc)[:160]}\n"
+            "Optional. To enable list_notebook_schedules / list_notebook_runs "
+            "/ get_notebook_schedule:\n"
+            f"      gcloud projects add-iam-policy-binding {env.project} \\\n"
+            "        --member=MEMBER --role=roles/aiplatform.viewer"
+        )
+        return True
+    failing = len(result.get("failing", []))
+    _line(
+        OK,
+        f"{result['count']} scheduled notebooks readable "
+        f"({result['paused']} paused"
+        + (f", {failing} failing in the last 7 days" if failing else "")
+        + ")",
+    )
+    return True
+
+
 def _check_audit_log() -> bool:
     """The audit trail is the only record of what was asked; say if it is off."""
     from .observability import _audit_path
@@ -351,6 +384,7 @@ def run_doctor() -> int:
             results.append(datasets_ok)
             results.append(_check_locations(env, names))
             results.append(_check_scheduled_queries(env))
+            results.append(_check_notebook_schedules(env))
             healthy = all(results) and healthy
         else:
             _line(SKIP, "BigQuery checks (no usable credentials)")

@@ -32,6 +32,7 @@ from .tools import (
     discovery_tools,
     environment_tools,
     query_tools,
+    schedule_tools,
     transfer_tools,
 )
 
@@ -60,6 +61,19 @@ def _instructions() -> str:
         "scripts\", BigQuery notebooks, saved queries or data canvases is "
         "answered by list_code_assets and get_code_asset. Never say this "
         "server cannot see notebooks.\n\n"
+        "A SCHEDULED NOTEBOOK'S OWN STATUS IS NOT ITS HEALTH. "
+        "list_notebook_schedules shows which Colab notebooks run on a "
+        "schedule and how many of their recent runs actually failed; "
+        "list_notebook_runs lists the failed runs themselves across every "
+        "schedule, and get_notebook_schedule returns one schedule's cron, "
+        "notebook and recent errors. Use these whenever a scheduled notebook, "
+        "notebook schedule or \"scheduled colab\" is mentioned, and when a "
+        "table written by a notebook has gone stale. A schedule reports its "
+        "last run as OK when it merely launched the notebook, so never "
+        "conclude a scheduled notebook is healthy from its state or from "
+        "next_run -- only the run counts say that. A PAUSED schedule is the "
+        "single most common reason a notebook-written table stopped "
+        "updating.\n\n"
         "BEFORE CHANGING OR DROPPING A TABLE, FIND WHO READS IT. "
         "list_scheduled_queries says what writes a table; "
         "find_code_assets_using_table says which notebooks and saved queries "
@@ -108,6 +122,7 @@ for module in (
     discovery_tools,
     transfer_tools,
     code_asset_tools,
+    schedule_tools,
     query_tools,
 ):
     module.register(mcp)
