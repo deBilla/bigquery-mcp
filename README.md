@@ -30,6 +30,9 @@ executes against BigQuery under **your own** Google credentials.
 | `list_code_assets` | Notebooks, saved queries and data canvases in BigQuery Studio | free |
 | `get_code_asset` | One notebook or saved query's body, notebook outputs stripped | free |
 | `find_code_assets_using_table` | Which notebooks/saved queries **read** a table | quota, not $ |
+| `list_notebook_schedules` | Scheduled Colab notebooks, with how many recent runs failed | free |
+| `list_notebook_runs` | Individual notebook runs across every schedule — failures by default | free |
+| `get_notebook_schedule` | One schedule's cron, notebook and recent errors | free |
 | `run_query` | Run a validated, read-only `SELECT` and return rows | scans data |
 
 Only `run_query` costs anything, so the discovery tools are the ones to spend
@@ -90,6 +93,55 @@ Two things about that storage are worth knowing before you configure it:
 Reads are quota-limited by volume rather than by concurrency, and the quota
 refills over tens of seconds. Exhaustion is retried with backoff and, if it
 persists, reported as something to retry shortly rather than as a failure.
+
+---
+
+## Scheduled Colab notebooks
+
+A notebook in BigQuery Studio can have a schedule attached to it, and those
+runs are where scheduled work goes unwatched: nothing reports on them, so a
+notebook can fail nightly for weeks and the only symptom is a table that
+quietly stopped moving. On the platform this was built against, 354 of 7,061
+runs had failed and none of it was visible.
+
+Answering one question means joining three resources, which is most of why it
+was hard to see. The **schedule** is a Vertex AI `Schedule` (cron, timezone,
+paused or not); each **run** is a `NotebookExecutionJob`; the **notebook** is
+the same Dataform code asset `list_code_assets` lists — so a failing schedule
+leads straight to `get_code_asset` for the code that failed. That means a
+fourth API and a fourth permission, `roles/aiplatform.viewer`. Without it the
+three tools return an error naming the role and everything else works normally.
+No new dependency: this talks to Vertex AI over REST rather than pulling in
+`google-cloud-aiplatform` for two list endpoints.
+
+Three things are worth knowing before trusting what you see:
+
+- **A schedule reports itself healthy while its notebook fails.** Every one of
+  49 live schedules reports its last scheduled run as `OK` — including one
+  whose previous 79 runs had failed. `OK` means the scheduler successfully
+  *launched* a job, not that the notebook ran. That field is what the console
+  shows first, and it is exactly how this went unnoticed, so health here is
+  always computed from execution jobs and the schedule's own status is never
+  reported as one. A `PAUSED` schedule, meanwhile, is the single most common
+  reason a notebook-written table went stale.
+
+- **Outcome cannot be filtered server-side.** Vertex AI rejects a `jobState`
+  filter outright and caps pages at 100, so "show me the failures" means
+  reading pages and filtering locally. Runs *are* ordered newest-first, which
+  is what makes a bounded window affordable: `lookback_days` (30 by default, so
+  monthly schedules show at least one run) stops the walk instead of scanning a
+  year of history. 30 days is about 7 API calls; 90 is about 23.
+
+- **Runs outlive the schedule that created them.** Deleting and recreating a
+  schedule is the normal way to edit one, so 7,061 live runs referenced 75
+  distinct schedules of which only 49 still existed. Those runs are real and
+  their failures count, so they are labelled `(schedule no longer exists)`
+  rather than dropped. For the same reason display names are not unique — two
+  live schedules shared one — so an ambiguous name is an error listing the
+  candidates and their ids, never a silently chosen first match.
+
+`data-platform-mcp doctor` reports how many schedules are readable, how many
+are paused and how many failed in the last week.
 
 ---
 

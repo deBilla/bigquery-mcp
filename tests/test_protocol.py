@@ -30,6 +30,9 @@ EXPECTED_TOOLS = {
     "list_code_assets",
     "get_code_asset",
     "find_code_assets_using_table",
+    "list_notebook_schedules",
+    "list_notebook_runs",
+    "get_notebook_schedule",
 }
 
 
