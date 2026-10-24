@@ -1,0 +1,16 @@
+name: Feature request
+description: A new tool, a better error message, or a gap in the docs
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What question could you not answer, or what went wrong? Concrete examples help most.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+      description: Remember the server is read-only by design — proposals that write, delete or trigger anything will be declined.

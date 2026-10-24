@@ -736,6 +736,10 @@ personal ADC.
 
 ## Development
 
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), and the
+[`good first issue`](https://github.com/deBilla/bigquery-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+label for a place to start.
+
 ```bash
 ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m pytest
