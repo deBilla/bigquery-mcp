@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work the way the README says it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Redact project IDs, dataset names and emails** before pasting anything.
+        Security problems (a way around the read-only guarantee, credential exposure) should go through
+        [private vulnerability reporting](https://github.com/deBilla/bigquery-mcp/security/advisories/new) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`data-platform-mcp doctor` output"
+      description: Run `uvx data-platform-mcp doctor` (with your usual env vars) and paste the result, redacted.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`server_version` from `list_environments`, or `pip show data-platform-mcp`"
+      placeholder: "0.4.0"
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Other (say which below)
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
