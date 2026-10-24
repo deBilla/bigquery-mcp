@@ -4,6 +4,7 @@ from __future__ import annotations
 
 GIB = 1024**3
 TIB = 1024**4
+PIB = 1024**5
 
 
 def scan_estimate(num_bytes: int, cost_per_tib_usd: float) -> dict:
@@ -36,7 +37,7 @@ def format_cost(usd: float) -> str:
 def human_bytes(num_bytes: int) -> str:
     """Render a byte count at a sensible unit, for use inside error messages."""
     num_bytes = num_bytes or 0
-    for unit, size in (("TiB", TIB), ("GiB", GIB), ("MiB", 1024**2), ("KiB", 1024)):
+    for unit, size in (("PiB", PIB), ("TiB", TIB), ("GiB", GIB), ("MiB", 1024**2), ("KiB", 1024)):
         if num_bytes >= size:
             return f"{num_bytes / size:.2f} {unit}"
     return f"{num_bytes} B"
