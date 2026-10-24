@@ -179,3 +179,40 @@ def test_a_disallowed_dataset_raises_rather_than_returning_an_error(
     with pytest.raises(DataPlatformMCPError) as exc:
         call()
     assert "payroll" in str(exc.value) and "sales" in str(exc.value)
+
+
+# --- list_tables -------------------------------------------------------------
+
+
+def test_list_tables_reports_truncation_when_over_cap(fake_client, monkeypatch):
+    """More tables than the cap must be flagged, not silently partial.
+
+    An AI client that sees a truncated list without the flag treats it as
+    complete and never learns the dataset holds more.
+    """
+    monkeypatch.setattr(discovery_tools, "_MAX_TABLES", 3)
+    fake_client.tables = [
+        type("T", (), {"table_id": f"t{i}", "table_type": "TABLE"})()
+        for i in range(5)
+    ]
+
+    result = discovery_tools.list_tables("events_raw")
+
+    assert result["truncated"] is True
+    assert "note" in result
+    assert result["count"] == 3
+    assert len(result["tables"]) == 3
+
+
+def test_list_tables_omits_truncated_key_when_under_cap(fake_client, monkeypatch):
+    monkeypatch.setattr(discovery_tools, "_MAX_TABLES", 3)
+    fake_client.tables = [
+        type("T", (), {"table_id": f"t{i}", "table_type": "TABLE"})()
+        for i in range(2)
+    ]
+
+    result = discovery_tools.list_tables("events_raw")
+
+    assert "truncated" not in result
+    assert result["count"] == 2
+    assert len(result["tables"]) == 2
