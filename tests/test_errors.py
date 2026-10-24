@@ -79,8 +79,53 @@ def test_permission_denied_names_both_roles_a_query_needs():
     out = explain_exception(api_exceptions.Forbidden("no"))
     assert isinstance(out, DataPlatformMCPError)
     text = str(out)
+    assert "permission denied" in text
     assert "bigquery.jobUser" in text and "bigquery.dataViewer" in text
     assert "different project" in text
+
+
+def test_quota_forbidden_is_not_reported_as_permission_denied():
+    """A BigQuery quota 403 has a retry/quota fix, not an IAM role fix."""
+    out = explain_exception(api_exceptions.Forbidden("Quota exceeded: daily limit"))
+    assert isinstance(out, DataPlatformMCPError)
+    text = str(out)
+    assert "quota or rate limit" in text
+    assert "Wait and retry" in text
+    assert "permission denied" not in text
+    assert "Quota exceeded: daily limit" in text
+
+
+def test_forbidden_quota_reason_is_read_from_api_error_details():
+    """The API's structured reason can identify a quota when its message cannot."""
+    exc = api_exceptions.Forbidden(
+        "Request failed",
+        errors=[{"reason": "rateLimitExceeded"}],
+    )
+
+    out = explain_exception(exc)
+    assert isinstance(out, DataPlatformMCPError)
+    assert "quota or rate limit" in str(out)
+    assert "permission denied" not in str(out)
+
+
+def test_http_and_grpc_rate_limits_get_quota_guidance(monkeypatch):
+    """HTTP 429 and its ResourceExhausted alias share the retry advice."""
+    monkeypatch.setattr(
+        "data_platform_mcp.errors._environment_hint",
+        lambda _: ("environment 'local' (project demo-project)", "query-reader"),
+    )
+    for exc in (
+        api_exceptions.TooManyRequests("HTTP 429: quota"),
+        api_exceptions.ResourceExhausted("quota"),
+    ):
+        out = explain_exception(exc)
+        assert isinstance(out, DataPlatformMCPError)
+        text = str(out)
+        assert "environment 'local' (project demo-project)" in text
+        assert "query-reader" in text
+        assert "quota or rate limit" in text
+        assert "Wait and retry" in text
+        assert "permission denied" not in text
 
 
 def test_grpc_permission_denied_is_covered_by_the_same_branch():
@@ -102,4 +147,9 @@ def test_the_underlying_error_is_kept_for_debugging():
 
 def test_an_unrecognised_error_passes_through_untouched():
     original = ValueError("something else entirely")
+    assert explain_exception(original) is original
+
+
+def test_quota_text_on_an_unrecognised_error_passes_through_untouched():
+    original = ValueError("rateLimitExceeded")
     assert explain_exception(original) is original
