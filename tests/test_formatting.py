@@ -18,6 +18,8 @@ GIB = 1024**3
         (3 * 1024**2, "3.00 MiB"),
         (213 * GIB, "213.00 GiB"),
         (5 * 1024**4, "5.00 TiB"),
+        (3 * 1024**5, "3.00 PiB"),
+        (1023 * 1024**4, "1023.00 TiB"),
     ],
 )
 def test_sizes_pick_a_readable_unit(num_bytes, expected):
