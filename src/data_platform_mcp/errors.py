@@ -28,6 +28,25 @@ def _environment_hint(environment: str) -> tuple[str, str]:
         return "the requested environment", ""
 
 
+def _has_quota_reason(exc: Exception, detail: str) -> bool:
+    """Recognize BigQuery quota reasons in either the message or API details."""
+    values = [detail]
+    errors = getattr(exc, "errors", ()) or ()
+    if isinstance(errors, dict):
+        errors = (errors,)
+    values.extend(
+        error.get("reason", "")
+        for error in errors
+        if isinstance(error, dict)
+    )
+
+    for value in values:
+        normalized = "".join(char for char in str(value).casefold() if char.isalnum())
+        if "quotaexceeded" in normalized or "ratelimitexceeded" in normalized:
+            return True
+    return False
+
+
 def explain_exception(exc: Exception, environment: str = "") -> Exception:
     """Return a clearer error for known failure shapes, or the original."""
     try:
@@ -103,6 +122,21 @@ def explain_exception(exc: Exception, environment: str = "") -> Exception:
         from google.api_core import exceptions as api_exceptions
     except ImportError:  # pragma: no cover
         return exc
+
+    is_quota_failure = isinstance(exc, api_exceptions.TooManyRequests) or (
+        isinstance(exc, api_exceptions.Forbidden) and _has_quota_reason(exc, detail)
+    )
+    if is_quota_failure:
+        identity = (
+            f"service account '{service_account}'"
+            if service_account
+            else "the signed-in user"
+        )
+        return DataPlatformMCPError(
+            f"{label}: a BigQuery quota or rate limit was exceeded for {identity}. "
+            "Wait and retry, or check the project's quotas in Google Cloud Console.\n"
+            f"Underlying error: {detail[:300]}"
+        )
 
     # PermissionDenied (gRPC) subclasses Forbidden (HTTP 403), so this covers both.
     if isinstance(exc, api_exceptions.Forbidden):
